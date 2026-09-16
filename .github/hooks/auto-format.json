@@ -1,0 +1,24 @@
+{
+  "name": "Auto Format After Code Changes",
+  "description": "Run the repository Prettier script after editing application source files.",
+  "version": "1.0.0",
+  "trigger": {
+    "event": "PostToolUse",
+    "tools": ["create_file", "apply_patch"],
+    "condition": {
+      "filePattern": "src/**/*.{ts,tsx,css}"
+    }
+  },
+  "action": {
+    "type": "command",
+    "command": "npm run format",
+    "background": true,
+    "silent": true,
+    "timeout": 10000
+  },
+  "options": {
+    "debounce": 1000,
+    "skipOnError": true,
+    "notifyOnFailure": false
+  }
+}

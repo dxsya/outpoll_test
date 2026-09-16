@@ -76,16 +76,16 @@ src/
 type Platform = "kalshi" | "polymarket";
 
 type MarketCategory = {
-	id: string;
-	label: string;
+  id: string;
+  label: string;
 };
 
 type MarketVolumePoint = {
-	timestamp: string;
-	volumeUsd: number;
-	marketId: string;
-	categoryId: string;
-	platform: Platform;
+  timestamp: string;
+  volumeUsd: number;
+  marketId: string;
+  categoryId: string;
+  platform: Platform;
 };
 ```
 
