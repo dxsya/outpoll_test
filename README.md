@@ -23,7 +23,7 @@ npm run build
 
 ## Источники данных
 
-Запросы выполняются из браузера через typed API adapters в `src/lib/api/`. Ответы проходят Zod-валидацию, затем нормализуются в общую доменную модель. React Query отвечает за cache, deduplication, retry, `AbortSignal` и состояния запроса.
+Браузер запрашивает same-origin Route Handler `/api/dashboard`; typed API adapters в `src/lib/api/` выполняются на сервере. Ответы проходят Zod-валидацию, затем нормализуются в общую доменную модель. React Query отвечает за cache, deduplication, retry, `AbortSignal` и состояния запроса.
 
 ### Kalshi
 
@@ -61,14 +61,16 @@ GET https://data-api.polymarket.com/v2/trades
 Подтверждённые поля:
 
 - `/markets/keyset` возвращает `{ markets, next_cursor }`; cursor opaque и передаётся обратно как `next_cursor`;
-- market содержит `id`, `conditionId`, `question`, `category`, `volumeNum`, `closed` и связанные metadata;
+- market содержит `id`, `conditionId`, `question`, `category`, `tags`, `volumeNum`, `closed` и связанные metadata;
 - `/v2/trades?condition={conditionId}&limit={limit}` возвращает `{ data, pagination }`;
 - trade содержит `condition_id`, `size`, `price`, `timestamp`;
 - `size` измеряется в shares, `price` в USDC за share, поэтому trade notional считается как `size * price`;
 - pagination использует `pagination.next_cursor`, а не offset; cursor нужно передавать неизменённым;
 - API может вернуть `429` и `Retry-After`, поэтому retry должен учитывать временную ошибку и лимит запросов.
 
-В отличие от Kalshi, у Polymarket нет готового daily volume в market metadata. Исторический ряд строится из trade pages по каждому condition ID, затем trades агрегируются по UTC-дню. Это реальные данные, но путь тяжелее: число запросов растёт вместе с количеством markets и trades. Для production-версии нужно ограничить число markets, применять server-side filters, кэшировать результат React Query и не загружать неограниченную историю в один браузерный запрос.
+В отличие от Kalshi, у Polymarket нет готового daily volume в market metadata. Исторический ряд строится из trade pages по top-12 markets, выбранным по `volumeNum`, затем trades агрегируются по UTC bucket. Список markets проходит keyset pagination с safety limit, а история каждого выбранного market проходит bounded trade pagination.
+
+Для честного cohort-сравнения обе платформы используют одинаковое число исторических markets: top 12 по platform-specific volume (`volume_fp` для Kalshi и `volumeNum` для Polymarket). Категории обеих платформ приводятся к общей таксономии `Politics`, `Sports`, `Weather`, `Technology`, `Entertainment`, `Crypto`, `Economics` и `Other`.
 
 ### Сопоставимость метрик
 
@@ -99,7 +101,31 @@ GET https://data-api.polymarket.com/v2/trades
 - `src/lib/api/errors.ts` обрабатывает HTTP errors, `Retry-After`, timestamps и finite numbers;
 - `src/lib/api/pagination.ts` содержит общий cursor pagination helper с safety limit;
 - `src/types/market.ts` содержит общие platform/market/volume types;
-- `src/lib/api/*.test.ts` покрывает normalization, categories, timestamp, malformed values, pagination и error boundaries.
+- `src/lib/chart/aggregate-series.test.ts` покрывает доменную агрегацию и её edge cases.
+
+Исторические points подключены в `fetchDashboardSnapshotFromApis`: Kalshi получает daily candlesticks, Polymarket получает trades, после чего обе платформы нормализуются и агрегируются перед передачей в UI. Диапазон передаётся в `/api/dashboard?range=7d|30d|90d|all`.
+
+Каталог может содержать больше markets, чем исторический cohort графика. В summary отдельно показываются размеры полного каталога и количество markets, реально использованных для исторического графика на каждой платформе.
+
+## График и выбранный стек
+
+График реализован через `echarts-for-react` и Apache ECharts с Canvas renderer. Это позволяет использовать настоящие time/value axes, две независимые USD-шкалы, axis tooltip для обеих платформ и crosshair с snap к ближайшей точке. Для touch-сценариев включены `click`-активация tooltip и draggable crosshair handle; `aria` включён в конфигурации ECharts, а рядом с canvas есть текстовое summary для screen readers.
+
+Диапазон и категории синхронизированы с URL: `/?range=30d&categories=politics,sports`. Отсутствующий `categories` означает все категории, а пустой `categories=` показывает состояние «No categories selected». Изменения фильтров создают history entries, поэтому Back/Forward восстанавливают состояние интерфейса.
+
+Дополнительные возможности dashboard:
+
+- category share pie chart строится из выбранных normalized volume points;
+- `Period delta` сравнивает сумму второй половины выбранного периода с первой половиной;
+- тема по умолчанию следует `prefers-color-scheme`, а кнопка `Theme` переключает system/light/dark;
+- chart export скачивает текущие агрегированные данные в CSV и текущий вид графика в PNG или SVG.
+
+## Реализация этапа 3
+
+- `src/lib/chart/aggregate-series.ts` фильтрует markets по категориям и выбирает UTC bucket для диапазона;
+- дневная, недельная и месячная агрегация суммирует уникальные точки по платформам;
+- объединённая временная шкала сохраняет `null`, когда у платформы нет значения в bucket;
+- `src/lib/chart/aggregate-series.test.ts` проверяет пустые категории, дубликаты, пустые значения, UTC-недели и длинные диапазоны.
 
 ## Следующие ограничения этапа 2
 

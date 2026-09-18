@@ -1,5 +1,6 @@
 import { fetchJson, parseFiniteNumber, parseTimestampSeconds } from "@/lib/api/errors";
 import { collectCursorPages } from "@/lib/api/pagination";
+import { normalizeMarketCategory } from "@/lib/filters/normalize-category";
 import {
   polymarketMarketSchema,
   polymarketMarketsResponseSchema,
@@ -10,13 +11,14 @@ import type { Market, MarketCategory, VolumePoint } from "@/types/market";
 const GAMMA_API_BASE_URL = "https://gamma-api.polymarket.com";
 const DATA_API_BASE_URL = "https://data-api.polymarket.com/v2";
 const PAGE_LIMIT = 500;
-const MAX_MARKET_PAGES = 1;
+const MAX_MARKET_PAGES = 100;
 
 export type PolymarketMarket = {
   id: string;
   conditionId: string;
   question?: string | null;
   category?: string | null;
+  tags?: Array<{ id?: string; label?: string; slug?: string }>;
   volumeNum?: number | null;
   closed?: boolean | null;
 };
@@ -28,11 +30,13 @@ export type PolymarketTrade = {
   timestamp: number;
 };
 
-function toCategory(value: string | null | undefined): MarketCategory {
-  const label = value?.trim();
-  return label
-    ? { id: label.toLowerCase(), label }
-    : { id: "uncategorized", label: "Uncategorized" };
+function getMarketCategory(market: PolymarketMarket): MarketCategory {
+  if (market.category?.trim()) {
+    return normalizeMarketCategory(market.category);
+  }
+
+  const tag = market.tags?.find((item) => item.label?.trim() || item.slug?.trim());
+  return normalizeMarketCategory(tag?.label || tag?.slug);
 }
 
 export function normalizePolymarketMarket(market: PolymarketMarket): Market {
@@ -40,7 +44,7 @@ export function normalizePolymarketMarket(market: PolymarketMarket): Market {
     id: market.conditionId,
     platform: "polymarket",
     title: market.question?.trim() || market.id,
-    category: toCategory(market.category),
+    category: getMarketCategory(market),
     volumeMetric: "trade-notional-usdc",
     source: {
       gammaId: market.id,
@@ -58,7 +62,7 @@ export function normalizePolymarketTrades(
     timestamp: parseTimestampSeconds(trade.timestamp, "timestamp"),
     volumeUsd: parseFiniteNumber(trade.size, "size") * parseFiniteNumber(trade.price, "price"),
     marketId: market.conditionId,
-    categoryId: toCategory(market.category).id,
+    categoryId: getMarketCategory(market).id,
     platform: "polymarket",
   }));
 }
@@ -109,8 +113,10 @@ export async function fetchPolymarketTradesPage(
 export async function fetchAllPolymarketTrades(
   market: PolymarketMarket,
   signal: AbortSignal,
+  maxPages = 10,
 ): Promise<VolumePoint[]> {
   return collectCursorPages({
+    maxPages,
     fetchPage: async (cursor) => {
       const result = await fetchPolymarketTradesPage(market, signal, cursor);
       return { items: result.points, nextCursor: result.nextCursor };

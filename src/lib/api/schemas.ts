@@ -3,7 +3,11 @@ import { z } from "zod";
 export const kalshiMarketSchema = z.object({
   ticker: z.string().min(1),
   event_ticker: z.string().min(1),
+  title: z.string().optional(),
+  status: z.string().optional(),
   volume_fp: z.string(),
+  volume_24h_fp: z.string().optional(),
+  created_time: z.string().optional(),
 });
 
 export const kalshiMarketsResponseSchema = z.object({
@@ -46,6 +50,15 @@ export const polymarketMarketSchema = z.object({
   conditionId: z.string().min(1),
   question: z.string().nullable().optional(),
   category: z.string().nullable().optional(),
+  tags: z
+    .array(
+      z.object({
+        id: z.string().optional(),
+        label: z.string().optional(),
+        slug: z.string().optional(),
+      }),
+    )
+    .optional(),
   volumeNum: z.number().nullable().optional(),
   closed: z.boolean().nullable().optional(),
 });

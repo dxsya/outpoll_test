@@ -20,7 +20,7 @@ export type Market = {
 
 export type VolumePoint = {
   timestamp: number;
-  volumeUsd: number;
+  volumeUsd: number | null;
   marketId: string;
   categoryId: string;
   platform: Platform;
