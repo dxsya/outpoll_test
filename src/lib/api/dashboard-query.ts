@@ -1,18 +1,20 @@
 import {
-  fetchAllKalshiMarkets,
+  fetchAllKalshiEvents,
   fetchKalshiCandlesticks,
-  fetchKalshiCategory,
   normalizeKalshiMarket,
+  type KalshiMarket,
 } from "@/lib/api/kalshi";
 import {
   fetchAllPolymarketTrades,
-  fetchPolymarketMarkets,
+  fetchPolymarketMarketsByTag,
   normalizePolymarketMarket,
+  type PolymarketMarket,
 } from "@/lib/api/polymarket";
 import { aggregateVolumePoints, chooseAggregationBucket } from "@/lib/chart/aggregate-series";
+import { DASHBOARD_CATEGORIES, categoryOf } from "@/lib/filters/normalize-category";
 import type { DashboardRange, Market, PlatformSeries, VolumePoint } from "@/types/market";
 
-const TOP_MARKET_LIMIT = 12;
+const TOP_MARKETS_PER_CATEGORY = 15;
 const ALL_RANGE_DAYS = 365;
 
 export type DashboardQueryParams = {
@@ -45,113 +47,144 @@ function getRangeWindow(range: DashboardRange, endTs: number): { startTs: number
   return { startTs: endTs - days * 24 * 60 * 60, endTs };
 }
 
+type KalshiCandidate = { market: KalshiMarket; seriesTicker: string };
+
+/**
+ * Kalshi's `/events?with_nested_markets=true` already reports each event's
+ * category and its markets' volume, so one paged walk (open + closed) is
+ * enough to bucket every candidate market into the three dashboard
+ * categories, instead of a per-market series lookup.
+ */
+async function collectKalshiCandidatesByCategory(
+  signal: AbortSignal,
+): Promise<Map<string, KalshiCandidate[]>> {
+  const byCategory = new Map<string, KalshiCandidate[]>(
+    DASHBOARD_CATEGORIES.map((definition) => [definition.id, []]),
+  );
+  const [openEvents, closedEvents] = await Promise.all([
+    fetchAllKalshiEvents(signal, "open"),
+    fetchAllKalshiEvents(signal, "closed"),
+  ]);
+
+  for (const event of [...openEvents, ...closedEvents]) {
+    const definition = DASHBOARD_CATEGORIES.find((item) => item.kalshiCategory === event.category);
+    if (!definition || !event.markets) {
+      continue;
+    }
+
+    const bucket = byCategory.get(definition.id);
+    for (const market of event.markets) {
+      bucket?.push({ market, seriesTicker: event.series_ticker });
+    }
+  }
+
+  return byCategory;
+}
+
+async function collectPolymarketCandidatesByCategory(
+  signal: AbortSignal,
+): Promise<Map<string, PolymarketMarket[]>> {
+  const byCategory = new Map<string, PolymarketMarket[]>();
+  await Promise.all(
+    DASHBOARD_CATEGORIES.map(async (definition) => {
+      const marketLists = await Promise.all(
+        definition.polymarketTagIds.flatMap((tagId) => [
+          fetchPolymarketMarketsByTag(tagId, false, signal),
+          fetchPolymarketMarketsByTag(tagId, true, signal),
+        ]),
+      );
+      byCategory.set(definition.id, [
+        ...new Map(marketLists.flat().map((market) => [market.conditionId, market])).values(),
+      ]);
+    }),
+  );
+
+  return byCategory;
+}
+
+function pickTopKalshi(candidates: KalshiCandidate[], limit: number): KalshiCandidate[] {
+  return [...candidates]
+    .sort((left, right) => {
+      const diff = Number(right.market.volume_fp) - Number(left.market.volume_fp);
+      return diff !== 0 ? diff : left.market.ticker.localeCompare(right.market.ticker);
+    })
+    .slice(0, limit);
+}
+
+function pickTopPolymarket(candidates: PolymarketMarket[], limit: number): PolymarketMarket[] {
+  return [...candidates]
+    .sort((left, right) => {
+      const diff = (right.volumeNum ?? 0) - (left.volumeNum ?? 0);
+      return diff !== 0 ? diff : left.conditionId.localeCompare(right.conditionId);
+    })
+    .slice(0, limit);
+}
+
 export async function fetchDashboardSnapshotFromApis(
   signal: AbortSignal,
   range: DashboardRange = "30d",
   categoryIds: string[] | null = null,
 ): Promise<DashboardData> {
-  const [kalshiMarkets, historicalKalshiMarkets, polymarketMarkets] = await Promise.all([
-    fetchAllKalshiMarkets(signal),
-    fetchAllKalshiMarkets(signal, "closed"),
-    fetchPolymarketMarkets(signal),
-  ]);
-
   const endTs = Math.floor(Date.now() / 1000);
   const rangeWindow = getRangeWindow(range, endTs);
-  const candidateMarkets = [
-    ...new Map(
-      [...kalshiMarkets, ...historicalKalshiMarkets].map((market) => [market.ticker, market]),
-    ).values(),
-  ];
-  const historicalMarketCandidates = candidateMarkets
-    .filter((market) => Number(market.volume_fp) > 0)
-    .sort((left, right) => Number(right.volume_fp) - Number(left.volume_fp))
-    .slice(0, TOP_MARKET_LIMIT);
-  const kalshiLookups = new Map<string, Awaited<ReturnType<typeof fetchKalshiCategory>>>();
-  await Promise.all(
-    historicalMarketCandidates.map(async (market) => {
-      try {
-        kalshiLookups.set(
-          market.event_ticker,
-          await fetchKalshiCategory(market.event_ticker, signal),
-        );
-      } catch {}
-    }),
-  );
-  const normalizeKalshi = (market: Awaited<ReturnType<typeof fetchAllKalshiMarkets>>[number]) =>
-    normalizeKalshiMarket(
-      market,
-      kalshiLookups.get(market.event_ticker) ?? {
-        category: { id: "other", label: "Other" },
-        seriesTicker: market.event_ticker,
-      },
-    );
-  const topPolymarketMarkets = [...polymarketMarkets]
-    .sort((left, right) => (right.volumeNum ?? 0) - (left.volumeNum ?? 0))
-    .slice(0, TOP_MARKET_LIMIT);
-  const chartMarkets = [
-    ...historicalMarketCandidates.map(normalizeKalshi),
-    ...topPolymarketMarkets.map(normalizePolymarketMarket),
-  ];
-  const points = await Promise.all([
-    Promise.allSettled(
-      historicalMarketCandidates.map(async (market) => {
-        const lookup =
-          kalshiLookups.get(market.event_ticker) ??
-          (await fetchKalshiCategory(market.event_ticker, signal));
-        return fetchKalshiCandlesticks(
-          market,
-          rangeWindow,
-          lookup.seriesTicker,
-          signal,
-          lookup.category.id,
-        );
-      }),
-    ),
-    Promise.allSettled(
-      topPolymarketMarkets.map(async (market) => {
-        const points = await fetchAllPolymarketTrades(market, signal);
-        return points.filter(
-          (point) => point.timestamp >= rangeWindow.startTs && point.timestamp <= rangeWindow.endTs,
-        );
-      }),
-    ),
-  ]).then((results) =>
-    results.flatMap((platformResults) =>
-      platformResults.flatMap((result) => (result.status === "fulfilled" ? result.value : [])),
-    ),
-  );
-  const markets = [
-    ...new Map(
-      [...kalshiMarkets, ...historicalKalshiMarkets].map((market) => {
-        const normalized = normalizeKalshi(market);
-        return [normalized.id, normalized] as const;
-      }),
-    ).values(),
-    ...polymarketMarkets.map(normalizePolymarketMarket),
-  ];
-  const catalogMarketCounts = markets.reduce(
-    (counts, market) => {
-      counts[market.platform] += 1;
-      return counts;
-    },
-    { kalshi: 0, polymarket: 0 },
-  );
-  const categories = [
-    ...new Map(chartMarkets.map((market) => [market.category.id, market.category])).values(),
-  ].sort((left, right) => left.label.localeCompare(right.label));
+
+  const [kalshiByCategory, polymarketByCategory] = await Promise.all([
+    collectKalshiCandidatesByCategory(signal),
+    collectPolymarketCandidatesByCategory(signal),
+  ]);
+
+  const markets: Market[] = [];
+  const pointGroups: VolumePoint[][] = [];
+  const catalogMarketCounts = { kalshi: 0, polymarket: 0 };
+
+  for (const definition of DASHBOARD_CATEGORIES) {
+    const category = categoryOf(definition);
+    const kalshiCandidates = kalshiByCategory.get(definition.id) ?? [];
+    const polymarketCandidates = polymarketByCategory.get(definition.id) ?? [];
+    catalogMarketCounts.kalshi += kalshiCandidates.length;
+    catalogMarketCounts.polymarket += polymarketCandidates.length;
+
+    const topKalshi = pickTopKalshi(kalshiCandidates, TOP_MARKETS_PER_CATEGORY);
+    const topPolymarket = pickTopPolymarket(polymarketCandidates, TOP_MARKETS_PER_CATEGORY);
+
+    markets.push(...topKalshi.map(({ market }) => normalizeKalshiMarket(market, category)));
+    markets.push(...topPolymarket.map((market) => normalizePolymarketMarket(market, category)));
+
+    const [kalshiResults, polymarketResults] = await Promise.all([
+      Promise.allSettled(
+        topKalshi.map(({ market, seriesTicker }) =>
+          fetchKalshiCandlesticks(market, rangeWindow, seriesTicker, signal, definition.id),
+        ),
+      ),
+      Promise.allSettled(
+        topPolymarket.map(async (market) => {
+          const points = await fetchAllPolymarketTrades(market, definition.id, signal);
+          return points.filter(
+            (point) =>
+              point.timestamp >= rangeWindow.startTs && point.timestamp <= rangeWindow.endTs,
+          );
+        }),
+      ),
+    ]);
+
+    for (const result of [...kalshiResults, ...polymarketResults]) {
+      pointGroups.push(result.status === "fulfilled" ? result.value : []);
+    }
+  }
+
+  const allPoints = pointGroups.flat();
+  const categories = DASHBOARD_CATEGORIES.map(categoryOf);
   const selectedCategories = categoryIds === null ? null : new Set(categoryIds);
-  const filteredChartMarkets = chartMarkets.filter(
+  const filteredMarkets = markets.filter(
     (market) => selectedCategories === null || selectedCategories.has(market.category.id),
   );
   const filteredMarketIds = new Set(
-    filteredChartMarkets.map((market) => `${market.platform}:${market.id}`),
+    filteredMarkets.map((market) => `${market.platform}:${market.id}`),
   );
-  const filteredPoints =
-    selectedCategories === null
-      ? points
-      : points.filter((point) => filteredMarketIds.has(`${point.platform}:${point.marketId}`));
-  const selectedMarketCounts = filteredChartMarkets.reduce(
+  const filteredPoints = allPoints.filter((point) =>
+    filteredMarketIds.has(`${point.platform}:${point.marketId}`),
+  );
+  const selectedMarketCounts = filteredMarkets.reduce(
     (counts, market) => {
       counts[market.platform] += 1;
       return counts;
@@ -162,7 +195,7 @@ export async function fetchDashboardSnapshotFromApis(
   return {
     series: aggregateVolumePoints(filteredPoints, chooseAggregationBucket(range)),
     categories,
-    markets: filteredChartMarkets,
+    markets: filteredMarkets,
     catalogMarketCounts,
     volumePoints: filteredPoints,
     selectedMarketCounts,

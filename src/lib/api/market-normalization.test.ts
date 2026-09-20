@@ -13,7 +13,7 @@ describe("market normalization", () => {
         status: "active",
         volume_fp: "123.45",
       },
-      { category: { id: "sports", label: "Sports" }, seriesTicker: "KXTEST-S" },
+      { id: "sports", label: "Sports" },
     );
 
     expect(market).toMatchObject({
@@ -24,15 +24,17 @@ describe("market normalization", () => {
     });
   });
 
-  it("uses Polymarket tags when category is absent", () => {
-    const market = normalizePolymarketMarket({
-      id: "123",
-      conditionId: "0xcondition",
-      question: "Tagged market",
-      tags: [{ id: "2", label: "Politics", slug: "politics" }],
-      volumeNum: 42,
-      closed: false,
-    });
+  it("attaches the resolved category to a Polymarket market", () => {
+    const market = normalizePolymarketMarket(
+      {
+        id: "123",
+        conditionId: "0xcondition",
+        question: "Tagged market",
+        volumeNum: 42,
+        closed: false,
+      },
+      { id: "politics", label: "Politics" },
+    );
 
     expect(market.category).toEqual({ id: "politics", label: "Politics" });
   });
@@ -42,9 +44,9 @@ describe("market normalization", () => {
       {
         id: "123",
         conditionId: "0xcondition",
-        category: "Sports",
       },
       [{ condition_id: "0xcondition", size: 10, price: 0.25, timestamp: 1_000 }],
+      "sports",
     );
 
     expect(points[0]).toMatchObject({

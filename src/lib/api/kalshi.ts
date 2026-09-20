@@ -1,17 +1,11 @@
 import { fetchJson, parseFiniteNumber, parseTimestampSeconds } from "@/lib/api/errors";
 import { collectCursorPages } from "@/lib/api/pagination";
-import { normalizeMarketCategory } from "@/lib/filters/normalize-category";
-import {
-  kalshiCandlesticksResponseSchema,
-  kalshiEventResponseSchema,
-  kalshiMarketsResponseSchema,
-  kalshiSeriesResponseSchema,
-} from "@/lib/api/schemas";
+import { kalshiCandlesticksResponseSchema, kalshiEventsResponseSchema } from "@/lib/api/schemas";
 import type { Market, MarketCategory, VolumePoint } from "@/types/market";
 
 const KALSHI_API_BASE_URL = "https://api.elections.kalshi.com/trade-api/v2";
-const KALSHI_PAGE_LIMIT = 1000;
-const MAX_KALSHI_MARKET_PAGES = 10;
+const KALSHI_EVENT_PAGE_LIMIT = 200;
+const MAX_KALSHI_EVENT_PAGES = 15;
 
 export type KalshiMarketStatus = "open" | "closed";
 
@@ -25,17 +19,19 @@ export type KalshiMarket = {
   created_time?: string;
 };
 
-export type KalshiCategoryLookup = {
-  category: MarketCategory;
-  seriesTicker: string;
+export type KalshiEventWithMarkets = {
+  event_ticker: string;
+  series_ticker: string;
+  category?: string | null;
+  markets?: KalshiMarket[];
 };
 
-export function normalizeKalshiMarket(market: KalshiMarket, lookup: KalshiCategoryLookup): Market {
+export function normalizeKalshiMarket(market: KalshiMarket, category: MarketCategory): Market {
   return {
     id: market.ticker,
     platform: "kalshi",
     title: market.title?.trim() || market.ticker,
-    category: normalizeMarketCategory(lookup.category.label),
+    category,
     volumeMetric: "contract-notional-usd",
     source: {
       eventTicker: market.event_ticker,
@@ -59,51 +55,39 @@ export function normalizeKalshiCandlesticks(
   }));
 }
 
-async function fetchKalshiMarketsPage(
+async function fetchKalshiEventsPage(
   cursor: string | null,
   signal: AbortSignal,
   status: KalshiMarketStatus,
-): Promise<{ markets: KalshiMarket[]; cursor: string }> {
-  const url = new URL(`${KALSHI_API_BASE_URL}/markets`);
-  url.searchParams.set("limit", String(KALSHI_PAGE_LIMIT));
+): Promise<{ events: KalshiEventWithMarkets[]; cursor: string }> {
+  const url = new URL(`${KALSHI_API_BASE_URL}/events`);
+  url.searchParams.set("limit", String(KALSHI_EVENT_PAGE_LIMIT));
   url.searchParams.set("status", status);
+  url.searchParams.set("with_nested_markets", "true");
   if (cursor) {
     url.searchParams.set("cursor", cursor);
   }
 
-  const payload = kalshiMarketsResponseSchema.parse(await fetchJson(url, { signal }));
-  return payload;
+  return kalshiEventsResponseSchema.parse(await fetchJson(url, { signal }));
 }
 
-export async function fetchAllKalshiMarkets(
+/**
+ * Fetches events with nested markets. Kalshi's `/events` response already
+ * includes each event's category and its markets' volume, so a single paged
+ * walk covers every category without a per-market series lookup round trip.
+ */
+export async function fetchAllKalshiEvents(
   signal: AbortSignal,
-  status: KalshiMarketStatus = "open",
-  maxPages = MAX_KALSHI_MARKET_PAGES,
-): Promise<KalshiMarket[]> {
+  status: KalshiMarketStatus,
+  maxPages = MAX_KALSHI_EVENT_PAGES,
+): Promise<KalshiEventWithMarkets[]> {
   return collectCursorPages({
     maxPages,
     fetchPage: async (cursor) => {
-      const result = await fetchKalshiMarketsPage(cursor, signal, status);
-      return { items: result.markets, nextCursor: result.cursor || null };
+      const page = await fetchKalshiEventsPage(cursor, signal, status);
+      return { items: page.events, nextCursor: page.cursor || null };
     },
   });
-}
-
-export async function fetchKalshiCategory(
-  eventTicker: string,
-  signal: AbortSignal,
-): Promise<KalshiCategoryLookup> {
-  const eventUrl = new URL(`${KALSHI_API_BASE_URL}/events/${encodeURIComponent(eventTicker)}`);
-  const eventPayload = kalshiEventResponseSchema.parse(await fetchJson(eventUrl, { signal }));
-  const seriesUrl = new URL(
-    `${KALSHI_API_BASE_URL}/series/${encodeURIComponent(eventPayload.event.series_ticker)}`,
-  );
-  const seriesPayload = kalshiSeriesResponseSchema.parse(await fetchJson(seriesUrl, { signal }));
-
-  return {
-    category: normalizeMarketCategory(seriesPayload.series.category),
-    seriesTicker: seriesPayload.series.ticker,
-  };
 }
 
 export async function fetchKalshiCandlesticks(

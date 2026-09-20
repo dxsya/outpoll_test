@@ -15,24 +15,16 @@ export const kalshiMarketsResponseSchema = z.object({
   cursor: z.string(),
 });
 
-export const kalshiEventSchema = z.object({
+export const kalshiEventWithMarketsSchema = z.object({
   event_ticker: z.string().min(1),
   series_ticker: z.string().min(1),
   category: z.string().nullable().optional(),
+  markets: z.array(kalshiMarketSchema).optional(),
 });
 
-export const kalshiEventResponseSchema = z.object({
-  event: kalshiEventSchema,
-});
-
-export const kalshiSeriesSchema = z.object({
-  ticker: z.string().min(1),
-  category: z.string().min(1),
-  categories: z.array(z.string()),
-});
-
-export const kalshiSeriesResponseSchema = z.object({
-  series: kalshiSeriesSchema,
+export const kalshiEventsResponseSchema = z.object({
+  events: z.array(kalshiEventWithMarketsSchema),
+  cursor: z.string(),
 });
 
 export const kalshiCandlestickSchema = z.object({
@@ -47,7 +39,9 @@ export const kalshiCandlesticksResponseSchema = z.object({
 
 export const polymarketMarketSchema = z.object({
   id: z.string().min(1),
-  conditionId: z.string().min(1),
+  // Some Gamma markets (e.g. not-yet-initialized ones) report an empty
+  // conditionId; filter those out downstream instead of failing validation.
+  conditionId: z.string(),
   question: z.string().nullable().optional(),
   category: z.string().nullable().optional(),
   tags: z
