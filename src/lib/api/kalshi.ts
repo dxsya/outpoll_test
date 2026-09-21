@@ -1,4 +1,9 @@
-import { fetchJson, parseFiniteNumber, parseTimestampSeconds } from "@/lib/api/errors";
+import {
+  fetchJson,
+  parseFiniteNumber,
+  parseTimestampSeconds,
+  type RequestStats,
+} from "@/lib/api/errors";
 import { collectCursorPages } from "@/lib/api/pagination";
 import { kalshiCandlesticksResponseSchema, kalshiEventsResponseSchema } from "@/lib/api/schemas";
 import type { Market, MarketCategory, VolumePoint } from "@/types/market";
@@ -59,6 +64,7 @@ async function fetchKalshiEventsPage(
   cursor: string | null,
   signal: AbortSignal,
   status: KalshiMarketStatus,
+  requestStats?: RequestStats,
 ): Promise<{ events: KalshiEventWithMarkets[]; cursor: string }> {
   const url = new URL(`${KALSHI_API_BASE_URL}/events`);
   url.searchParams.set("limit", String(KALSHI_EVENT_PAGE_LIMIT));
@@ -68,7 +74,7 @@ async function fetchKalshiEventsPage(
     url.searchParams.set("cursor", cursor);
   }
 
-  return kalshiEventsResponseSchema.parse(await fetchJson(url, { signal }));
+  return kalshiEventsResponseSchema.parse(await fetchJson(url, { signal }, requestStats));
 }
 
 /**
@@ -80,11 +86,12 @@ export async function fetchAllKalshiEvents(
   signal: AbortSignal,
   status: KalshiMarketStatus,
   maxPages = MAX_KALSHI_EVENT_PAGES,
+  requestStats?: RequestStats,
 ): Promise<KalshiEventWithMarkets[]> {
   return collectCursorPages({
     maxPages,
     fetchPage: async (cursor) => {
-      const page = await fetchKalshiEventsPage(cursor, signal, status);
+      const page = await fetchKalshiEventsPage(cursor, signal, status, requestStats);
       return { items: page.events, nextCursor: page.cursor || null };
     },
   });
@@ -96,6 +103,7 @@ export async function fetchKalshiCandlesticks(
   seriesTicker: string,
   signal: AbortSignal,
   categoryId = "uncategorized",
+  requestStats?: RequestStats,
 ): Promise<VolumePoint[]> {
   const url = new URL(
     `${KALSHI_API_BASE_URL}/series/${encodeURIComponent(seriesTicker)}/markets/${encodeURIComponent(market.ticker)}/candlesticks`,
@@ -104,6 +112,8 @@ export async function fetchKalshiCandlesticks(
   url.searchParams.set("end_ts", String(range.endTs));
   url.searchParams.set("period_interval", "1440");
 
-  const payload = kalshiCandlesticksResponseSchema.parse(await fetchJson(url, { signal }));
+  const payload = kalshiCandlesticksResponseSchema.parse(
+    await fetchJson(url, { signal }, requestStats),
+  );
   return normalizeKalshiCandlesticks(market, payload.candlesticks, categoryId);
 }

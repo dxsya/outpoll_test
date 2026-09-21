@@ -4,10 +4,12 @@ import * as echarts from "echarts";
 import ReactECharts from "echarts-for-react";
 import { useMemo, useRef } from "react";
 
+import { useI18n } from "@/lib/i18n";
 import type { PlatformSeries } from "@/types/market";
 
 type VolumeChartProps = {
   series: PlatformSeries[];
+  isLoading?: boolean;
 };
 
 function downloadFile(content: string, filename: string, type: string): void {
@@ -31,20 +33,8 @@ const colors = {
   polymarket: "#f97316",
 } as const;
 
-function formatValue(value: number | null): string {
-  if (value === null) {
-    return "No data";
-  }
-
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-    notation: "compact",
-  }).format(value);
-}
-
-export function VolumeChart({ series }: VolumeChartProps) {
+export function VolumeChart({ series, isLoading = false }: VolumeChartProps) {
+  const { locale, t, formatValue } = useI18n();
   const hasPoints = series.some((item) => item.points.length > 0);
   const chartRef = useRef<ReactECharts>(null);
   const option = useMemo(() => {
@@ -64,21 +54,42 @@ export function VolumeChart({ series }: VolumeChartProps) {
         confine: true,
         valueFormatter: (value: number | null) => formatValue(value),
       },
-      legend: { data: ["Kalshi", "Polymarket"] },
-      grid: { left: 64, right: 64, top: 48, bottom: 48, containLabel: true },
+      legend: { data: ["Kalshi", "Polymarket"], top: 8, left: "center" },
+      dataZoom: [
+        {
+          type: "inside",
+          xAxisIndex: 0,
+          filterMode: "none",
+          zoomOnMouseWheel: true,
+          moveOnMouseMove: true,
+          moveOnMouseWheel: true,
+        },
+        {
+          type: "slider",
+          xAxisIndex: 0,
+          filterMode: "none",
+          height: 22,
+          bottom: 8,
+          brushSelect: false,
+        },
+      ],
+      grid: { left: 64, right: 64, top: 48, bottom: 78, containLabel: true },
       xAxis: {
         type: "time",
         data: timestamps,
         axisLabel: {
           hideOverlap: true,
           formatter: (value: number) =>
-            new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(value),
+            new Intl.DateTimeFormat(locale === "zh" ? "zh-CN" : locale, {
+              month: "short",
+              day: "numeric",
+            }).format(value),
         },
       },
       yAxis: [
         {
           type: "value",
-          name: "Kalshi USD",
+          name: t("kalshiUsd"),
           nameTextStyle: { color: "rgba(8, 145, 178, 0.8)" },
           axisLabel: {
             color: "rgba(8, 145, 178, 0.8)",
@@ -94,7 +105,7 @@ export function VolumeChart({ series }: VolumeChartProps) {
         },
         {
           type: "value",
-          name: "Polymarket USD",
+          name: t("polymarketUsd"),
           nameTextStyle: { color: "rgba(249, 115, 22, 0.8)" },
           axisLabel: {
             color: "rgba(249, 115, 22, 0.8)",
@@ -121,7 +132,7 @@ export function VolumeChart({ series }: VolumeChartProps) {
         data: item.points.map((point) => [point.timestamp * 1000, point.volumeUsd]),
       })),
     };
-  }, [series]);
+  }, [formatValue, locale, series, t]);
 
   function exportCsv(): void {
     const timestamps = series[0]?.points.map((point) => point.timestamp) ?? [];
@@ -168,14 +179,13 @@ export function VolumeChart({ series }: VolumeChartProps) {
       <div className="flex flex-wrap items-baseline justify-between gap-3">
         <div>
           <h2 id="volume-chart-title" className="text-lg font-semibold">
-            Historical volume
+            {t("historicalVolume")}
           </h2>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-            UTC buckets. Kalshi contract-notional proxy and Polymarket trade notional are shown
-            separately.
+            {t("volumeDescription")}
           </p>
         </div>
-        <div className="flex flex-wrap gap-2" aria-label="Chart export actions">
+        <div className="flex flex-wrap gap-2" aria-label={t("chartExportActions")}>
           <button
             type="button"
             onClick={exportCsv}
@@ -198,20 +208,31 @@ export function VolumeChart({ series }: VolumeChartProps) {
             SVG
           </button>
         </div>
-        {!hasPoints ? (
-          <p className="text-sm text-slate-500">No historical points returned.</p>
-        ) : null}
+        {!hasPoints ? <p className="text-sm text-slate-500">{t("noHistoricalPoints")}</p> : null}
       </div>
       {hasPoints ? (
-        <ReactECharts
-          ref={chartRef}
-          option={option}
-          notMerge
-          lazyUpdate
-          aria-label="Historical volume chart for Kalshi and Polymarket"
-          style={{ height: 360, width: "100%" }}
-          opts={{ renderer: "canvas" }}
-        />
+        <div className="relative" aria-busy={isLoading}>
+          <ReactECharts
+            ref={chartRef}
+            option={option}
+            notMerge
+            lazyUpdate
+            aria-label={t("historicalVolumeChart")}
+            style={{ height: 400, width: "100%" }}
+            opts={{ renderer: "canvas" }}
+          />
+          {isLoading ? (
+            <div
+              className="pointer-events-none absolute inset-0 flex items-center justify-center bg-white/35 dark:bg-slate-900/35"
+              role="status"
+              aria-label={t("updatingChart")}
+            >
+              <span className="rounded-md bg-slate-900/85 px-3 py-2 text-xs font-semibold text-white shadow-sm dark:bg-white/90 dark:text-slate-950">
+                {t("updatingChart")}
+              </span>
+            </div>
+          ) : null}
+        </div>
       ) : null}
       <p className="sr-only">
         {series

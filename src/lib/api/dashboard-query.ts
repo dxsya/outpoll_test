@@ -12,10 +12,12 @@ import {
 } from "@/lib/api/polymarket";
 import { aggregateVolumePoints, chooseAggregationBucket } from "@/lib/chart/aggregate-series";
 import { DASHBOARD_CATEGORIES, categoryOf } from "@/lib/filters/normalize-category";
-import type { DashboardRange, Market, PlatformSeries, VolumePoint } from "@/types/market";
+import { mapWithConcurrency } from "@/lib/api/pagination";
+import type { RequestStats } from "@/lib/api/errors";
+import type { DashboardRange, Market, Platform, PlatformSeries, VolumePoint } from "@/types/market";
 
 const TOP_MARKETS_PER_CATEGORY = 15;
-const ALL_RANGE_DAYS = 365;
+const HISTORY_REQUEST_CONCURRENCY = 4;
 
 export type DashboardQueryParams = {
   range: DashboardRange;
@@ -27,7 +29,7 @@ export function dashboardQueryKey(params: DashboardQueryParams) {
     "volume-dashboard",
     {
       range: params.range,
-      categories: [...(params.categoryIds ?? [])].sort(),
+      categories: params.categoryIds === null ? "all" : [...params.categoryIds].sort(),
     },
   ] as const;
 }
@@ -39,11 +41,32 @@ export type DashboardData = {
   catalogMarketCounts: { kalshi: number; polymarket: number };
   volumePoints: VolumePoint[];
   selectedMarketCounts: { kalshi: number; polymarket: number };
+  sourceErrors: Partial<Record<Platform, string>>;
+  requestStats: Record<Platform, RequestStats>;
   fetchedAt: number;
 };
 
-function getRangeWindow(range: DashboardRange, endTs: number): { startTs: number; endTs: number } {
-  const days = range === "7d" ? 7 : range === "30d" ? 30 : range === "90d" ? 90 : ALL_RANGE_DAYS;
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "Public API request failed";
+}
+
+function setSourceError(
+  sourceErrors: Partial<Record<Platform, string>>,
+  platform: Platform,
+  error: unknown,
+): void {
+  sourceErrors[platform] ??= errorMessage(error);
+}
+
+export function getRangeWindow(
+  range: DashboardRange,
+  endTs: number,
+): { startTs: number; endTs: number } {
+  if (range === "all") {
+    return { startTs: 0, endTs };
+  }
+
+  const days = range === "7d" ? 7 : range === "30d" ? 30 : 90;
   return { startTs: endTs - days * 24 * 60 * 60, endTs };
 }
 
@@ -57,17 +80,19 @@ type KalshiCandidate = { market: KalshiMarket; seriesTicker: string };
  */
 async function collectKalshiCandidatesByCategory(
   signal: AbortSignal,
+  categoryDefinitions: typeof DASHBOARD_CATEGORIES,
+  requestStats: RequestStats,
 ): Promise<Map<string, KalshiCandidate[]>> {
   const byCategory = new Map<string, KalshiCandidate[]>(
-    DASHBOARD_CATEGORIES.map((definition) => [definition.id, []]),
+    categoryDefinitions.map((definition) => [definition.id, []]),
   );
   const [openEvents, closedEvents] = await Promise.all([
-    fetchAllKalshiEvents(signal, "open"),
-    fetchAllKalshiEvents(signal, "closed"),
+    fetchAllKalshiEvents(signal, "open", undefined, requestStats),
+    fetchAllKalshiEvents(signal, "closed", undefined, requestStats),
   ]);
 
   for (const event of [...openEvents, ...closedEvents]) {
-    const definition = DASHBOARD_CATEGORIES.find((item) => item.kalshiCategory === event.category);
+    const definition = categoryDefinitions.find((item) => item.kalshiCategory === event.category);
     if (!definition || !event.markets) {
       continue;
     }
@@ -83,21 +108,21 @@ async function collectKalshiCandidatesByCategory(
 
 async function collectPolymarketCandidatesByCategory(
   signal: AbortSignal,
+  categoryDefinitions: typeof DASHBOARD_CATEGORIES,
+  requestStats: RequestStats,
 ): Promise<Map<string, PolymarketMarket[]>> {
   const byCategory = new Map<string, PolymarketMarket[]>();
-  await Promise.all(
-    DASHBOARD_CATEGORIES.map(async (definition) => {
-      const marketLists = await Promise.all(
-        definition.polymarketTagIds.flatMap((tagId) => [
-          fetchPolymarketMarketsByTag(tagId, false, signal),
-          fetchPolymarketMarketsByTag(tagId, true, signal),
-        ]),
-      );
-      byCategory.set(definition.id, [
-        ...new Map(marketLists.flat().map((market) => [market.conditionId, market])).values(),
-      ]);
-    }),
-  );
+  await mapWithConcurrency(categoryDefinitions, HISTORY_REQUEST_CONCURRENCY, async (definition) => {
+    const marketLists = await Promise.all(
+      definition.polymarketTagIds.flatMap((tagId) => [
+        fetchPolymarketMarketsByTag(tagId, false, signal, undefined, undefined, requestStats),
+        fetchPolymarketMarketsByTag(tagId, true, signal, undefined, undefined, requestStats),
+      ]),
+    );
+    byCategory.set(definition.id, [
+      ...new Map(marketLists.flat().map((market) => [market.conditionId, market])).values(),
+    ]);
+  });
 
   return byCategory;
 }
@@ -127,17 +152,56 @@ export async function fetchDashboardSnapshotFromApis(
 ): Promise<DashboardData> {
   const endTs = Math.floor(Date.now() / 1000);
   const rangeWindow = getRangeWindow(range, endTs);
+  const selectedCategories = categoryIds === null ? null : new Set(categoryIds);
 
-  const [kalshiByCategory, polymarketByCategory] = await Promise.all([
-    collectKalshiCandidatesByCategory(signal),
-    collectPolymarketCandidatesByCategory(signal),
+  if (selectedCategories?.size === 0) {
+    return {
+      series: aggregateVolumePoints([], chooseAggregationBucket(range)),
+      categories: DASHBOARD_CATEGORIES.map(categoryOf),
+      markets: [],
+      catalogMarketCounts: { kalshi: 0, polymarket: 0 },
+      volumePoints: [],
+      selectedMarketCounts: { kalshi: 0, polymarket: 0 },
+      sourceErrors: {},
+      requestStats: {
+        kalshi: { sent: 0, failed: 0 },
+        polymarket: { sent: 0, failed: 0 },
+      },
+      fetchedAt: Date.now(),
+    };
+  }
+
+  const categoryDefinitions = DASHBOARD_CATEGORIES.filter(
+    (definition) => selectedCategories === null || selectedCategories.has(definition.id),
+  );
+  const requestStats: Record<Platform, RequestStats> = {
+    kalshi: { sent: 0, failed: 0 },
+    polymarket: { sent: 0, failed: 0 },
+  };
+
+  const [kalshiCandidatesResult, polymarketCandidatesResult] = await Promise.allSettled([
+    collectKalshiCandidatesByCategory(signal, categoryDefinitions, requestStats.kalshi),
+    collectPolymarketCandidatesByCategory(signal, categoryDefinitions, requestStats.polymarket),
   ]);
+  const sourceErrors: Partial<Record<Platform, string>> = {};
+  const kalshiByCategory =
+    kalshiCandidatesResult.status === "fulfilled" ? kalshiCandidatesResult.value : new Map();
+  const polymarketByCategory =
+    polymarketCandidatesResult.status === "fulfilled"
+      ? polymarketCandidatesResult.value
+      : new Map();
+  if (kalshiCandidatesResult.status === "rejected") {
+    setSourceError(sourceErrors, "kalshi", kalshiCandidatesResult.reason);
+  }
+  if (polymarketCandidatesResult.status === "rejected") {
+    setSourceError(sourceErrors, "polymarket", polymarketCandidatesResult.reason);
+  }
 
   const markets: Market[] = [];
   const pointGroups: VolumePoint[][] = [];
   const catalogMarketCounts = { kalshi: 0, polymarket: 0 };
 
-  for (const definition of DASHBOARD_CATEGORIES) {
+  for (const definition of categoryDefinitions) {
     const category = categoryOf(definition);
     const kalshiCandidates = kalshiByCategory.get(definition.id) ?? [];
     const polymarketCandidates = polymarketByCategory.get(definition.id) ?? [];
@@ -151,30 +215,58 @@ export async function fetchDashboardSnapshotFromApis(
     markets.push(...topPolymarket.map((market) => normalizePolymarketMarket(market, category)));
 
     const [kalshiResults, polymarketResults] = await Promise.all([
-      Promise.allSettled(
-        topKalshi.map(({ market, seriesTicker }) =>
-          fetchKalshiCandlesticks(market, rangeWindow, seriesTicker, signal, definition.id),
-        ),
+      mapWithConcurrency(topKalshi, HISTORY_REQUEST_CONCURRENCY, async ({ market, seriesTicker }) =>
+        Promise.allSettled([
+          fetchKalshiCandlesticks(
+            market,
+            rangeWindow,
+            seriesTicker,
+            signal,
+            definition.id,
+            requestStats.kalshi,
+          ),
+        ]),
       ),
-      Promise.allSettled(
-        topPolymarket.map(async (market) => {
-          const points = await fetchAllPolymarketTrades(market, definition.id, signal);
-          return points.filter(
-            (point) =>
-              point.timestamp >= rangeWindow.startTs && point.timestamp <= rangeWindow.endTs,
-          );
-        }),
+      mapWithConcurrency(topPolymarket, HISTORY_REQUEST_CONCURRENCY, async (market) =>
+        Promise.allSettled([
+          fetchAllPolymarketTrades(
+            market,
+            definition.id,
+            signal,
+            undefined,
+            requestStats.polymarket,
+          ).then((points) =>
+              points.filter(
+                (point) =>
+                  point.timestamp >= rangeWindow.startTs && point.timestamp <= rangeWindow.endTs,
+              ),
+            ),
+        ]),
       ),
     ]);
 
-    for (const result of [...kalshiResults, ...polymarketResults]) {
-      pointGroups.push(result.status === "fulfilled" ? result.value : []);
+    for (const [result] of kalshiResults) {
+      if (result.status === "fulfilled") {
+        pointGroups.push(result.value);
+      } else {
+        setSourceError(sourceErrors, "kalshi", result.reason);
+      }
     }
+    for (const [result] of polymarketResults) {
+      if (result.status === "fulfilled") {
+        pointGroups.push(result.value);
+      } else {
+        setSourceError(sourceErrors, "polymarket", result.reason);
+      }
+    }
+  }
+
+  if (signal.aborted) {
+    throw signal.reason;
   }
 
   const allPoints = pointGroups.flat();
   const categories = DASHBOARD_CATEGORIES.map(categoryOf);
-  const selectedCategories = categoryIds === null ? null : new Set(categoryIds);
   const filteredMarkets = markets.filter(
     (market) => selectedCategories === null || selectedCategories.has(market.category.id),
   );
@@ -199,6 +291,8 @@ export async function fetchDashboardSnapshotFromApis(
     catalogMarketCounts,
     volumePoints: filteredPoints,
     selectedMarketCounts,
+    sourceErrors,
+    requestStats,
     fetchedAt: Date.now(),
   };
 }
@@ -208,14 +302,5 @@ export async function fetchDashboardSnapshot(
   range: DashboardRange = "30d",
   categoryIds: string[] | null = null,
 ): Promise<DashboardData> {
-  const params = new URLSearchParams({ range });
-  if (categoryIds !== null) {
-    params.set("categories", [...categoryIds].sort().join(","));
-  }
-  const response = await fetch(`/api/dashboard?${params.toString()}`, { signal });
-  if (!response.ok) {
-    throw new Error(`Dashboard request failed with status ${response.status}`);
-  }
-
-  return (await response.json()) as DashboardData;
+  return fetchDashboardSnapshotFromApis(signal, range, categoryIds);
 }

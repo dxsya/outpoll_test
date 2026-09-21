@@ -1,4 +1,9 @@
-import { fetchJson, parseFiniteNumber, parseTimestampSeconds } from "@/lib/api/errors";
+import {
+  fetchJson,
+  parseFiniteNumber,
+  parseTimestampSeconds,
+  type RequestStats,
+} from "@/lib/api/errors";
 import { collectCursorPages } from "@/lib/api/pagination";
 import {
   polymarketMarketSchema,
@@ -68,6 +73,7 @@ export async function fetchPolymarketMarketsByTag(
   signal: AbortSignal,
   limit = PAGE_LIMIT,
   maxPages = MAX_MARKET_PAGES,
+  requestStats?: RequestStats,
 ): Promise<PolymarketMarket[]> {
   return collectCursorPages({
     maxPages,
@@ -81,7 +87,9 @@ export async function fetchPolymarketMarketsByTag(
         url.searchParams.set("next_cursor", cursor);
       }
 
-      const payload = polymarketMarketsResponseSchema.parse(await fetchJson(url, { signal }));
+      const payload = polymarketMarketsResponseSchema.parse(
+        await fetchJson(url, { signal }, requestStats),
+      );
       const items = payload.markets
         .map((market) => polymarketMarketSchema.parse(market))
         .filter((market) => market.conditionId.length > 0);
@@ -95,6 +103,7 @@ export async function fetchPolymarketTradesPage(
   categoryId: string,
   signal: AbortSignal,
   cursor: string | null = null,
+  requestStats?: RequestStats,
 ): Promise<{ points: VolumePoint[]; nextCursor: string | null }> {
   const url = new URL(`${DATA_API_BASE_URL}/trades`);
   url.searchParams.set("condition", market.conditionId);
@@ -103,7 +112,9 @@ export async function fetchPolymarketTradesPage(
     url.searchParams.set("cursor", cursor);
   }
 
-  const payload = polymarketTradesResponseSchema.parse(await fetchJson(url, { signal }));
+  const payload = polymarketTradesResponseSchema.parse(
+    await fetchJson(url, { signal }, requestStats),
+  );
   return {
     points: normalizePolymarketTrades(market, payload.data, categoryId),
     nextCursor: payload.pagination.has_more ? payload.pagination.next_cursor : null,
@@ -115,11 +126,18 @@ export async function fetchAllPolymarketTrades(
   categoryId: string,
   signal: AbortSignal,
   maxPages = 10,
+  requestStats?: RequestStats,
 ): Promise<VolumePoint[]> {
   return collectCursorPages({
     maxPages,
     fetchPage: async (cursor) => {
-      const result = await fetchPolymarketTradesPage(market, categoryId, signal, cursor);
+      const result = await fetchPolymarketTradesPage(
+        market,
+        categoryId,
+        signal,
+        cursor,
+        requestStats,
+      );
       return { items: result.points, nextCursor: result.nextCursor };
     },
   });

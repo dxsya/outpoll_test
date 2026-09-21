@@ -1,5 +1,25 @@
 export const MAX_PAGES_PER_RESOURCE = 100;
 
+export async function mapWithConcurrency<T, Result>(
+  items: readonly T[],
+  limit: number,
+  mapItem: (item: T) => Promise<Result>,
+): Promise<Result[]> {
+  const results: Result[] = new Array(items.length);
+  let nextIndex = 0;
+
+  async function worker(): Promise<void> {
+    while (nextIndex < items.length) {
+      const itemIndex = nextIndex;
+      nextIndex += 1;
+      results[itemIndex] = await mapItem(items[itemIndex]);
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
 export async function collectCursorPages<T>(options: {
   fetchPage: (cursor: string | null) => Promise<{ items: T[]; nextCursor: string | null }>;
   maxPages?: number;

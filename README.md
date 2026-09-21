@@ -31,23 +31,20 @@ npm run build
 
 ```text
 GET https://api.elections.kalshi.com/trade-api/v2/markets
-GET https://api.elections.kalshi.com/trade-api/v2/events/{event_ticker}
-GET https://api.elections.kalshi.com/trade-api/v2/series/{series_ticker}
+GET https://api.elections.kalshi.com/trade-api/v2/events?with_nested_markets=true
 GET https://api.elections.kalshi.com/trade-api/v2/series/{series_ticker}/markets/{ticker}/candlesticks
 ```
 
 Подтверждённые поля:
 
-- `/markets` возвращает `{ markets, cursor }`; `limit` поддерживает до 1000, pagination cursor-based;
-- market содержит `ticker`, `event_ticker` и `volume_fp`;
-- event связывает market с `series_ticker`;
-- series содержит `category` и `categories`;
+- `/events?with_nested_markets=true` возвращает `{ events, cursor }`; pagination cursor-based;
+- event связывает market с `series_ticker` и категорией, а nested market содержит `ticker`, `event_ticker`, `volume_fp`, `created_time` и `close_time`;
 - candlesticks принимают `start_ts`, `end_ts` и `period_interval=1440` для дневных bucket;
 - candlestick содержит `end_period_ts` и `volume_fp`.
 
 `volume_fp` у Kalshi измеряется в контрактах. Для графика сейчас используется прозрачный proxy: один контракт трактуется как $1 contract-notional. Это не равно фактической сумме премий, поэтому UI и README должны называть метрику именно contract-notional proxy.
 
-Рынки, ушедшие за historical cutoff, требуют historical endpoints. Для первого этапа адаптер ограничен активными рынками и дневными live candlesticks; поддержку archived history нужно добавить перед полноценным режимом `all`.
+Для `all` адаптер получает как open, так и closed events и запрашивает доступные дневные candlesticks без искусственного годового cutoff. Исторический ряд остаётся ограниченным выбранным cohort: top-15 markets каждой доступной категории по текущему platform volume и safety limit пагинации.
 
 ### Polymarket
 
@@ -68,18 +65,18 @@ GET https://data-api.polymarket.com/v2/trades
 - pagination использует `pagination.next_cursor`, а не offset; cursor нужно передавать неизменённым;
 - API может вернуть `429` и `Retry-After`, поэтому retry должен учитывать временную ошибку и лимит запросов.
 
-В отличие от Kalshi, у Polymarket нет готового daily volume в market metadata. Исторический ряд строится из trade pages по top-12 markets, выбранным по `volumeNum`, затем trades агрегируются по UTC bucket. Список markets проходит keyset pagination с safety limit, а история каждого выбранного market проходит bounded trade pagination.
+В отличие от Kalshi, у Polymarket нет готового daily volume в market metadata. Исторический ряд строится из trade pages по top-15 markets на категорию, выбранным по `volumeNum`, затем trades агрегируются по UTC bucket. Список markets проходит keyset pagination с safety limit, а история каждого выбранного market проходит bounded trade pagination.
 
-Для честного cohort-сравнения обе платформы используют одинаковое число исторических markets: top 12 по platform-specific volume (`volume_fp` для Kalshi и `volumeNum` для Polymarket). Категории обеих платформ приводятся к общей таксономии `Politics`, `Sports`, `Weather`, `Technology`, `Entertainment`, `Crypto`, `Economics` и `Other`.
+Для сопоставимого cohort обе платформы используют одинаковое число исторических markets: top-15 на категорию по platform-specific volume (`volume_fp` для Kalshi и `volumeNum` для Polymarket). Категории приводятся к общей таксономии `Politics`, `Weather`, `Sports` через точное Kalshi category и Polymarket tag id.
 
 ### Сопоставимость метрик
 
 Метрики платформ не идентичны:
 
-| Platform | Raw metric | Normalized dashboard metric |
-| --- | --- | --- |
-| Kalshi | contracts in `volume_fp` | contract-notional proxy in USD |
-| Polymarket | shares and USDC/share in trades | trade notional in USDC |
+| Platform   | Raw metric                      | Normalized dashboard metric    |
+| ---------- | ------------------------------- | ------------------------------ |
+| Kalshi     | contracts in `volume_fp`        | contract-notional proxy in USD |
+| Polymarket | shares and USDC/share in trades | trade notional in USDC         |
 
 Обе серии показываются рядом для сравнительного анализа активности, но не должны описываться как строго одинаковый cash turnover без этой оговорки.
 
@@ -92,6 +89,7 @@ GET https://data-api.polymarket.com/v2/trades
 - Polymarket Gamma `/markets` работает, но помечен deprecated и предупреждает использовать `/markets/keyset`;
 - публичность API не гарантирует одинаковые CORS-заголовки для любого endpoint или production origin, поэтому deploy нужно проверять отдельно;
 - API requests не требуют секретов или API keys для выбранных read-only endpoints.
+- Внутренние запросы к одному источнику ограничены четырьмя одновременно выполняемыми задачами; `429` и `5xx` повторяются максимум два раза, с `Retry-After` или экспоненциальной паузой, отменяемой через `AbortSignal`.
 
 ## Реализация этапа 2
 
@@ -103,7 +101,7 @@ GET https://data-api.polymarket.com/v2/trades
 - `src/types/market.ts` содержит общие platform/market/volume types;
 - `src/lib/chart/aggregate-series.test.ts` покрывает доменную агрегацию и её edge cases.
 
-Исторические points подключены в `fetchDashboardSnapshotFromApis`: Kalshi получает daily candlesticks, Polymarket получает trades, после чего обе платформы нормализуются и агрегируются перед передачей в UI. Диапазон передаётся в `/api/dashboard?range=7d|30d|90d|all`.
+Исторические points подключены в `fetchDashboardSnapshotFromApis`: Kalshi получает daily candlesticks для open и closed markets, Polymarket получает trades, после чего обе платформы нормализуются и агрегируются перед передачей в UI. Диапазон передаётся в `/api/dashboard?range=7d|30d|90d|all`; `all` не имеет fixed-day cutoff. При пустом выборе категорий внешние запросы не выполняются.
 
 Каталог может содержать больше markets, чем исторический cohort графика. В summary отдельно показываются размеры полного каталога и количество markets, реально использованных для исторического графика на каждой платформе.
 
@@ -127,9 +125,8 @@ GET https://data-api.polymarket.com/v2/trades
 - объединённая временная шкала сохраняет `null`, когда у платформы нет значения в bucket;
 - `src/lib/chart/aggregate-series.test.ts` проверяет пустые категории, дубликаты, пустые значения, UTC-недели и длинные диапазоны.
 
-## Следующие ограничения этапа 2
+## Ограничения данных
 
-1. Подключить `dashboardQueryFn` к React Query и ограничить набор markets по диапазону/категориям.
-2. Добавить Kalshi historical markets/candlesticks для корректного `all`.
-3. Добавить integration tests с `fetch` fixtures для реальных envelope shapes без обращения к API в unit-тестах.
-4. Добавить измерение числа запросов и graceful partial failure для независимых платформ.
+- Режим `all` показывает все доступные API observations для bounded cohort, а не полный архив каждого рынка платформы.
+- Календари и определения объёма платформ различаются; значения пригодны для сравнения активности, но не являются строго идентичным cash turnover.
+- Частичные ошибки источников показываются в интерфейсе вместе с доступными данными другой платформы.

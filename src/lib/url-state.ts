@@ -34,7 +34,7 @@ export function serializeDashboardUrlState(state: DashboardUrlState): string {
   params.set("range", state.range);
 
   if (state.categoryIds !== null) {
-    params.set("categories", [...state.categoryIds].sort().join(","));
+    params.set("categories", [...new Set(state.categoryIds)].sort().join(","));
   }
 
   const query = params.toString();
