@@ -4,6 +4,8 @@ export type Platform = (typeof platforms)[number];
 
 export type DashboardRange = "7d" | "30d" | "90d" | "all";
 
+export type DashboardMetric = "total" | "average" | "markets";
+
 export type MarketCategory = {
   id: string;
   label: string;

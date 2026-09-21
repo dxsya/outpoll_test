@@ -236,11 +236,11 @@ export async function fetchDashboardSnapshotFromApis(
             undefined,
             requestStats.polymarket,
           ).then((points) =>
-              points.filter(
-                (point) =>
-                  point.timestamp >= rangeWindow.startTs && point.timestamp <= rangeWindow.endTs,
-              ),
+            points.filter(
+              (point) =>
+                point.timestamp >= rangeWindow.startTs && point.timestamp <= rangeWindow.endTs,
             ),
+          ),
         ]),
       ),
     ]);

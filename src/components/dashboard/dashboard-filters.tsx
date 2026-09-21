@@ -1,4 +1,4 @@
-import type { DashboardRange, MarketCategory } from "@/types/market";
+import { platforms, type DashboardRange, type MarketCategory, type Platform } from "@/types/market";
 import { useI18n } from "@/lib/i18n";
 
 const ranges: Array<{ id: DashboardRange; label: string }> = [
@@ -12,15 +12,21 @@ type DashboardFiltersProps = {
   range: DashboardRange;
   selectedCategoryIds: string[] | null;
   effectiveCategoryIds: string[] | null;
+  platformIds: Platform[] | null;
   categories: MarketCategory[];
   disabled: boolean;
-  onChange: (nextState: { range: DashboardRange; categoryIds: string[] | null }) => void;
+  onChange: (nextState: {
+    range: DashboardRange;
+    categoryIds: string[] | null;
+    platformIds: Platform[] | null;
+  }) => void;
 };
 
 export function DashboardFilters({
   range,
   selectedCategoryIds,
   effectiveCategoryIds,
+  platformIds,
   categories,
   disabled,
   onChange,
@@ -39,7 +45,9 @@ export function DashboardFilters({
             type="button"
             disabled={disabled}
             aria-pressed={range === option.id}
-            onClick={() => onChange({ range: option.id, categoryIds: effectiveCategoryIds })}
+            onClick={() =>
+              onChange({ range: option.id, categoryIds: effectiveCategoryIds, platformIds })
+            }
             className={`min-h-11 rounded-md border px-4 text-sm font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 disabled:cursor-not-allowed disabled:opacity-50 ${
               range === option.id
                 ? "border-cyan-700 bg-cyan-700 text-white"
@@ -55,7 +63,7 @@ export function DashboardFilters({
         <button
           type="button"
           aria-pressed={effectiveCategoryIds === null}
-          onClick={() => onChange({ range, categoryIds: null })}
+          onClick={() => onChange({ range, categoryIds: null, platformIds })}
           className={`min-h-11 rounded-md border px-3 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 ${
             effectiveCategoryIds === null
               ? "border-cyan-700 bg-cyan-700 text-white"
@@ -77,7 +85,7 @@ export function DashboardFilters({
                   const nextCategoryIds = selected
                     ? current.filter((id) => id !== category.id)
                     : [...current, category.id];
-                  onChange({ range, categoryIds: nextCategoryIds });
+                  onChange({ range, categoryIds: nextCategoryIds, platformIds });
                 }}
                 className="size-4 accent-cyan-700"
               />
@@ -88,6 +96,49 @@ export function DashboardFilters({
         <span className="basis-full text-xs text-slate-500 dark:text-slate-400">
           {t("allCategoriesShown")}
         </span>
+      </div>
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <span className="mr-2 text-sm font-semibold">{t("platforms")}</span>
+        <button
+          type="button"
+          aria-pressed={platformIds === null}
+          onClick={() => onChange({ range, categoryIds: effectiveCategoryIds, platformIds: null })}
+          className={`min-h-11 rounded-md border px-3 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 ${
+            platformIds === null
+              ? "border-cyan-700 bg-cyan-700 text-white"
+              : "border-slate-300 dark:border-slate-700"
+          }`}
+        >
+          {t("bothPlatforms")}
+        </button>
+        {platforms.map((platform) => {
+          const selected = platformIds?.includes(platform) ?? false;
+          return (
+            <button
+              key={platform}
+              type="button"
+              aria-pressed={selected}
+              onClick={() => {
+                const next = selected
+                  ? (platformIds?.filter((item) => item !== platform) ?? [])
+                  : [...(platformIds ?? platforms), platform];
+                const unique = [...new Set(next)];
+                onChange({
+                  range,
+                  categoryIds: effectiveCategoryIds,
+                  platformIds: unique.length === platforms.length ? null : unique,
+                });
+              }}
+              className={`min-h-11 rounded-md border px-3 text-sm capitalize focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 ${
+                selected
+                  ? "border-cyan-700 bg-cyan-700 text-white"
+                  : "border-slate-300 dark:border-slate-700"
+              }`}
+            >
+              {platform}
+            </button>
+          );
+        })}
       </div>
     </section>
   );

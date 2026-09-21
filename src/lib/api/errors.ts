@@ -95,9 +95,7 @@ export async function fetchJson(
 
     const backoffMilliseconds = Math.min(10_000, 500 * 2 ** attempt);
     await waitForRetry(
-      retryAfterSeconds === null
-        ? backoffMilliseconds
-        : Math.min(10_000, retryAfterSeconds * 1000),
+      retryAfterSeconds === null ? backoffMilliseconds : Math.min(10_000, retryAfterSeconds * 1000),
       init.signal,
     );
   }

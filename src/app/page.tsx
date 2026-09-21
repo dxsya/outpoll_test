@@ -17,9 +17,10 @@ import {
 } from "@/components/dashboard/dashboard-status";
 import { DashboardVolumeSection } from "@/components/dashboard/dashboard-volume-section";
 import { DashboardSummary } from "@/components/dashboard/dashboard-summary";
+import { MarketTable } from "@/components/dashboard/market-table";
 import { parseDashboardUrlState, serializeDashboardUrlState } from "@/lib/url-state";
 import { useI18n } from "@/lib/i18n";
-import type { DashboardRange } from "@/types/market";
+import type { DashboardMetric, DashboardRange, Platform } from "@/types/market";
 
 function DashboardPage() {
   const router = useRouter();
@@ -29,10 +30,24 @@ function DashboardPage() {
     () => parseDashboardUrlState(new URLSearchParams(searchParams.toString())),
     [searchParams],
   );
-  const { range, categoryIds: selectedCategoryIds } = urlState;
+  const { range, categoryIds: selectedCategoryIds, platformIds, metric } = urlState;
 
-  function updateUrl(nextState: { range: DashboardRange; categoryIds: string[] | null }): void {
-    router.push(`${pathname}${serializeDashboardUrlState(nextState)}`);
+  function updateUrl(nextState: {
+    range?: DashboardRange;
+    categoryIds?: string[] | null;
+    platformIds?: Platform[] | null;
+    metric?: DashboardMetric;
+  }): void {
+    router.push(
+      `${pathname}${serializeDashboardUrlState({
+        range: nextState.range ?? range,
+        categoryIds:
+          nextState.categoryIds === undefined ? selectedCategoryIds : nextState.categoryIds,
+        platformIds: nextState.platformIds === undefined ? platformIds : nextState.platformIds,
+        metric: nextState.metric ?? metric,
+      })}`,
+      { scroll: false },
+    );
   }
 
   const query = useQuery({
@@ -54,9 +69,16 @@ function DashboardPage() {
     const knownIds = selectedCategoryIds.filter((id) => availableIds.has(id));
     return knownIds;
   }, [dashboard, selectedCategoryIds]);
+  const filteredMarkets = useMemo(
+    () =>
+      dashboard?.markets.filter(
+        (market) => platformIds === null || platformIds.includes(market.platform),
+      ) ?? [],
+    [dashboard, platformIds],
+  );
   const filteredMarketIds = useMemo(
-    () => new Set(dashboard?.markets.map((market) => `${market.platform}:${market.id}`)),
-    [dashboard],
+    () => new Set(filteredMarkets.map((market) => `${market.platform}:${market.id}`)),
+    [filteredMarkets],
   );
   const chartSeries = useMemo(() => {
     if (!dashboard) {
@@ -91,6 +113,38 @@ function DashboardPage() {
     const current = values.slice(midpoint).reduce((sum, value) => sum + value, 0);
     return previous === 0 ? null : ((current - previous) / previous) * 100;
   }, [chartSeries]);
+  const filteredVolumePoints = useMemo(
+    () =>
+      dashboard?.volumePoints.filter((point) =>
+        filteredMarketIds.has(`${point.platform}:${point.marketId}`),
+      ) ?? [],
+    [dashboard, filteredMarketIds],
+  );
+  const totalVolume = useMemo(
+    () => filteredVolumePoints.reduce((total, point) => total + (point.volumeUsd ?? 0), 0),
+    [filteredVolumePoints],
+  );
+  const averageDailyVolume = useMemo(() => {
+    if (filteredVolumePoints.length === 0) return 0;
+    const timestamps = filteredVolumePoints.map((point) => point.timestamp);
+    const rangeDays =
+      range === "7d"
+        ? 7
+        : range === "30d"
+          ? 30
+          : range === "90d"
+            ? 90
+            : Math.max(1, Math.ceil((Math.max(...timestamps) - Math.min(...timestamps)) / 86400));
+    return totalVolume / rangeDays;
+  }, [filteredVolumePoints, range, totalVolume]);
+  const volumeByMarket = useMemo(() => {
+    const totals = new Map<string, number>();
+    filteredVolumePoints.forEach((point) => {
+      const key = `${point.platform}:${point.marketId}`;
+      totals.set(key, (totals.get(key) ?? 0) + (point.volumeUsd ?? 0));
+    });
+    return totals;
+  }, [filteredVolumePoints]);
 
   return (
     <main className="min-h-screen bg-slate-50 px-4 py-8 text-slate-950 dark:bg-slate-950 dark:text-white sm:px-8">
@@ -114,6 +168,7 @@ function DashboardPage() {
               range={range}
               selectedCategoryIds={selectedCategoryIds}
               effectiveCategoryIds={effectiveCategoryIds}
+              platformIds={platformIds}
               categories={dashboard.categories}
               disabled={query.isFetching}
               onChange={updateUrl}
@@ -123,7 +178,16 @@ function DashboardPage() {
               series={chartSeries}
               isLoading={query.isFetching}
             />
-            <DashboardSummary periodDelta={periodDelta} categoryShare={categoryShare} />
+            <DashboardSummary
+              periodDelta={periodDelta}
+              categoryShare={categoryShare}
+              metric={metric}
+              totalVolume={totalVolume}
+              averageDailyVolume={averageDailyVolume}
+              marketCount={filteredMarkets.length}
+              onMetricChange={(nextMetric) => updateUrl({ metric: nextMetric })}
+            />
+            <MarketTable markets={filteredMarkets} volumeByMarket={volumeByMarket} />
           </>
         ) : null}
       </div>
