@@ -1,6 +1,6 @@
 "use client";
 
-import ReactECharts from "echarts-for-react";
+import * as echarts from "echarts";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useI18n } from "@/lib/i18n";
@@ -35,19 +35,8 @@ export function CategoryShareChart({ data }: CategoryShareChartProps) {
   const { t, categoryLabel, formatValue } = useI18n();
   const [chartType, setChartType] = useState<CategoryChartType>("pie");
   const containerRef = useRef<HTMLDivElement>(null);
+  const chartRef = useRef<echarts.ECharts | null>(null);
   const [isCompact, setIsCompact] = useState(false);
-
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    const observer = new ResizeObserver(([entry]) => {
-      setIsCompact(entry.contentRect.width < COMPACT_WIDTH_BREAKPOINT);
-    });
-    observer.observe(container);
-
-    return () => observer.disconnect();
-  }, []);
 
   const option = useMemo(() => {
     const chartData = data.map((item) => ({
@@ -119,6 +108,39 @@ export function CategoryShareChart({ data }: CategoryShareChartProps) {
     };
   }, [categoryLabel, chartType, data, formatValue, isCompact, t]);
 
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || !data.length) return;
+
+    // Создаем инстанс ECharts
+    const chart = echarts.init(container);
+    chartRef.current = chart;
+
+    // Устанавливаем опции
+    chart.setOption(option);
+
+    // ResizeObserver для автоматического resize
+    const resizeObserver = new ResizeObserver(() => {
+      const width = container.getBoundingClientRect().width;
+      setIsCompact(width < COMPACT_WIDTH_BREAKPOINT);
+      chart.resize();
+    });
+    resizeObserver.observe(container);
+
+    // Window resize как дополнительная мера
+    const handleWindowResize = () => {
+      chart.resize();
+    };
+    window.addEventListener("resize", handleWindowResize);
+
+    // Cleanup
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener("resize", handleWindowResize);
+      chart.dispose();
+      chartRef.current = null;
+    };
+  }, [data, option]);
 
   return (
     <Card
@@ -150,14 +172,12 @@ export function CategoryShareChart({ data }: CategoryShareChartProps) {
           ))}
         </div>
       </div>
-      <div ref={containerRef}>
+      <div className="w-full">
         {data.length ? (
-          <ReactECharts
-            option={option}
-            notMerge
-            lazyUpdate
+          <div
+            ref={containerRef}
             aria-label={t("marketVolumeShare")}
-            style={{ height: 280, width: "100%" }}
+            style={{ height: isCompact ? 240 : 280, width: "100%" }}
           />
         ) : (
           <p className="py-12 text-center text-sm text-slate-500">{t("noCategoryVolume")}</p>

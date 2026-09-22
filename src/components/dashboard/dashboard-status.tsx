@@ -17,10 +17,7 @@ export function DashboardSkeleton() {
 
       <div className="grid gap-3 sm:grid-cols-3">
         {["skeleton-range", "skeleton-categories", "skeleton-scope"].map((key) => (
-          <div
-            key={key}
-            className="space-y-3 border border-slate-200 p-4 dark:border-slate-800"
-          >
+          <div key={key} className="space-y-3 border border-slate-200 p-4 dark:border-slate-800">
             <SkeletonBlock className="h-4 w-24" />
             <div className="flex flex-wrap gap-2">
               <SkeletonBlock className="h-8.5 w-16" />
@@ -80,7 +77,6 @@ export function DashboardSkeleton() {
     </section>
   );
 }
-
 
 export function InitialLoadError({ onRetry }: { onRetry: () => void }) {
   const { t } = useI18n();

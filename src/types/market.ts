@@ -18,7 +18,7 @@ export type Market = {
   platform: Platform;
   title: string;
   category: MarketCategory;
-  volumeMetric: "contract-notional-usd" | "trade-notional-usdc";
+  volumeMetric: "contract-notional-usd" | "outcome-token-count";
   source: Record<string, boolean | number | string | null>;
 };
 

@@ -53,7 +53,7 @@ describe("market normalization", () => {
     expect(market.category).toEqual({ id: "politics", label: "Politics" });
   });
 
-  it("normalizes Polymarket trade notional", () => {
+  it("normalizes Polymarket token count", () => {
     const points = normalizePolymarketTrades(
       {
         id: "123",
@@ -66,7 +66,7 @@ describe("market normalization", () => {
     expect(points[0]).toMatchObject({
       marketId: "0xcondition",
       categoryId: "sports",
-      volumeUsd: 2.5,
+      volumeUsd: 10,
     });
   });
 });

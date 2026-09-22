@@ -43,7 +43,7 @@ export function normalizePolymarketMarket(
     platform: "polymarket",
     title: market.question?.trim() || market.id,
     category,
-    volumeMetric: "trade-notional-usdc",
+    volumeMetric: "outcome-token-count",
     source: {
       gammaId: market.id,
       volumeUsd: market.volumeNum ?? null,
@@ -59,7 +59,7 @@ export function normalizePolymarketTrades(
 ): VolumePoint[] {
   return trades.map((trade) => ({
     timestamp: parseTimestampSeconds(trade.timestamp, "timestamp"),
-    volumeUsd: parseFiniteNumber(trade.size, "size") * parseFiniteNumber(trade.price, "price"),
+    volumeUsd: parseFiniteNumber(trade.size, "size"),
     marketId: market.conditionId,
     categoryId,
     platform: "polymarket",

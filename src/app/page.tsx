@@ -58,10 +58,9 @@ function DashboardPage() {
   const query = useQuery({
     queryKey: dashboardQueryKey({
       range,
-      categoryIds: categoryScope === "both" ? selectedCategoryIds : null,
+      categoryIds: null, // Всегда загружаем ВСЕ категории, фильтруем на клиенте
     }),
-    queryFn: ({ signal }) =>
-      fetchDashboardSnapshot(signal, range, categoryScope === "both" ? selectedCategoryIds : null),
+    queryFn: ({ signal }) => fetchDashboardSnapshot(signal, range, null),
     placeholderData: keepPreviousData,
     staleTime: 60_000,
     retry: false,
@@ -116,11 +115,28 @@ function DashboardPage() {
       .sort((left, right) => right.value - left.value);
   }, [dashboard, filteredVolumePoints]);
   const periodDelta = useMemo(() => {
-    const values = chartSeries.flatMap((item) => item.points.map((point) => point.volumeUsd ?? 0));
-    if (values.length < 2) return null;
-    const midpoint = Math.ceil(values.length / 2);
-    const previous = values.slice(0, midpoint).reduce((sum, value) => sum + value, 0);
-    const current = values.slice(midpoint).reduce((sum, value) => sum + value, 0);
+    if (chartSeries.length === 0) return null;
+
+    // Собираем все уникальные timestamps
+    const timestamps = [...new Set(chartSeries.flatMap((item) =>
+      item.points.map((point) => point.timestamp)
+    ))].sort((a, b) => a - b);
+
+    if (timestamps.length < 2) return null;
+
+    // Суммируем volume по каждому timestamp (kalshi + polymarket)
+    const volumeByTimestamp = timestamps.map((timestamp) => {
+      return chartSeries.reduce((sum, series) => {
+        const point = series.points.find((p) => p.timestamp === timestamp);
+        return sum + (point?.volumeUsd ?? 0);
+      }, 0);
+    });
+
+    // Делим на две половины по времени
+    const midpoint = Math.ceil(volumeByTimestamp.length / 2);
+    const previous = volumeByTimestamp.slice(0, midpoint).reduce((sum, value) => sum + value, 0);
+    const current = volumeByTimestamp.slice(midpoint).reduce((sum, value) => sum + value, 0);
+
     return previous === 0 ? null : ((current - previous) / previous) * 100;
   }, [chartSeries]);
   const totalVolume = useMemo(

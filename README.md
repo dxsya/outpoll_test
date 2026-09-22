@@ -129,10 +129,10 @@ GET https://data-api.polymarket.com/v2/trades
 - `volumeNum`;
 - `closed`.
 
-История собирается из trades. Для каждой сделки используется формула:
+История собирается из trades. Для каждой сделки используется количество токенов:
 
 ```text
-trade notional = size * price
+volume = size
 ```
 
 Pagination у обоих источников cursor-based. Cursor не преобразуется и передаётся обратно в следующий запрос.
@@ -147,7 +147,7 @@ type Market = {
   platform: "kalshi" | "polymarket";
   title: string;
   category: { id: string; label: string };
-  volumeMetric: "contract-notional-usd" | "trade-notional-usdc";
+  volumeMetric: "contract-notional-usd" | "outcome-token-count";
   source: Record<string, boolean | number | string | null>;
 };
 
@@ -160,14 +160,14 @@ type VolumePoint = {
 };
 ```
 
-Метрики платформ не идентичны:
+Метрики платформ теперь сопоставимы:
 
-| Платформа  | Исходная метрика                  | Что отображается              |
-| ---------- | --------------------------------- | ----------------------------- |
-| Kalshi     | Количество контрактов `volume_fp` | Contract-notional proxy в USD |
-| Polymarket | `size` и цена в USDC              | Trade notional в USDC         |
+| Платформа  | Исходная метрика                  | Что отображается                     |
+| ---------- | --------------------------------- | ------------------------------------ |
+| Kalshi     | Количество контрактов `volume_fp` | Количество проторгованных контрактов |
+| Polymarket | Количество токенов `size`         | Количество проторгованных токенов    |
 
-Для Kalshi используется прозрачный proxy: один контракт считается как `$1 contract-notional`. Это не является фактической суммой премий. Поэтому график сравнивает активность платформ, но не должен интерпретироваться как строго одинаковый cash turnover.
+Обе платформы показывают **количество проторгованных единиц** (контракты для Kalshi, outcome токены для Polymarket), а не денежный оборот. Это делает график сравнением торговой активности, а не cash turnover.
 
 ## Ограничение cohort
 

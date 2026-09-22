@@ -195,7 +195,10 @@ export const VolumeChart = forwardRef<VolumeChartHandle, VolumeChartProps>(funct
       exportPng: () => {
         const instance = chartRef.current?.getEchartsInstance();
         if (!instance) return;
-        downloadDataUrl(instance.getDataURL({ type: "png", pixelRatio: 2 }), "volume-dashboard.png");
+        downloadDataUrl(
+          instance.getDataURL({ type: "png", pixelRatio: 2 }),
+          "volume-dashboard.png",
+        );
       },
       exportSvg: () => {
         const container = document.createElement("div");
