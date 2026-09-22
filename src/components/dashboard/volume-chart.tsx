@@ -2,30 +2,24 @@
 
 import * as echarts from "echarts";
 import ReactECharts from "echarts-for-react";
-import { useMemo, useRef, useState } from "react";
+import { forwardRef, useImperativeHandle, useMemo, useRef, useState } from "react";
 
 import { useI18n } from "@/lib/i18n";
 import type { PlatformSeries } from "@/types/market";
-import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 
 export type ChartMode = "line" | "area" | "bar";
+
+export type VolumeChartHandle = {
+  exportPng: () => void;
+  exportSvg: () => void;
+};
 
 type VolumeChartProps = {
   series: PlatformSeries[];
   isLoading?: boolean;
   chartMode?: ChartMode;
-  onChartModeChange?: (mode: ChartMode) => void;
 };
-
-function downloadFile(content: string, filename: string, type: string): void {
-  const url = URL.createObjectURL(new Blob([content], { type }));
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.click();
-  URL.revokeObjectURL(url);
-}
 
 function downloadDataUrl(dataUrl: string, filename: string): void {
   const anchor = document.createElement("a");
@@ -34,31 +28,15 @@ function downloadDataUrl(dataUrl: string, filename: string): void {
   anchor.click();
 }
 
-function ExportIcon({ type }: { type: "csv" | "image" }) {
-  return type === "csv" ? (
-    <svg aria-hidden="true" className="size-3.5" viewBox="0 0 16 16" fill="none">
-      <path d="M8 2v8m0 0 3-3m-3 3L5 7M3 13h10" stroke="currentColor" strokeWidth="1.5" />
-    </svg>
-  ) : (
-    <svg aria-hidden="true" className="size-3.5" viewBox="0 0 16 16" fill="none">
-      <rect x="2" y="2.5" width="12" height="11" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
-      <circle cx="5.5" cy="6" r="1" fill="currentColor" />
-      <path d="m3.5 11 2.5-2.5 2 2 1.5-1.5 3 3" stroke="currentColor" strokeWidth="1.5" />
-    </svg>
-  );
-}
-
 const colors = {
   kalshi: "#0891b2",
   polymarket: "#f97316",
 } as const;
 
-export function VolumeChart({
-  series,
-  isLoading = false,
-  chartMode = "line",
-  onChartModeChange,
-}: VolumeChartProps) {
+export const VolumeChart = forwardRef<VolumeChartHandle, VolumeChartProps>(function VolumeChart(
+  { series, isLoading = false, chartMode = "line" },
+  ref,
+) {
   const { locale, t, formatValue } = useI18n();
   const [zoom, setZoom] = useState({ start: 0, end: 100 });
   const hasPoints = series.some((item) => item.points.length > 0);
@@ -177,97 +155,31 @@ export function VolumeChart({
     }
   }
 
-  function exportCsv(): void {
-    const timestamps = series[0]?.points.map((point) => point.timestamp) ?? [];
-    const rows = timestamps.map((timestamp, index) =>
-      [
-        new Date(timestamp * 1000).toISOString(),
-        ...series.map((item) => item.points[index]?.volumeUsd ?? ""),
-      ].join(","),
-    );
-    downloadFile(
-      ["timestamp,kalshi,polymarket", ...rows].join("\n"),
-      "volume-dashboard.csv",
-      "text/csv;charset=utf-8",
-    );
-  }
-
-  function exportImage(type: "png" | "svg"): void {
-    const instance = chartRef.current?.getEchartsInstance();
-    if (!instance) {
-      return;
-    }
-
-    if (type === "png") {
-      downloadDataUrl(instance.getDataURL({ type: "png", pixelRatio: 2 }), "volume-dashboard.png");
-      return;
-    }
-
-    const container = document.createElement("div");
-    const svgChart = echarts.init(container, undefined, {
-      renderer: "svg",
-      width: 1200,
-      height: 480,
-    });
-    svgChart.setOption(option);
-    downloadDataUrl(svgChart.getDataURL({ type: "svg" }), "volume-dashboard.svg");
-    svgChart.dispose();
-  }
+  useImperativeHandle(
+    ref,
+    () => ({
+      exportPng: () => {
+        const instance = chartRef.current?.getEchartsInstance();
+        if (!instance) return;
+        downloadDataUrl(instance.getDataURL({ type: "png", pixelRatio: 2 }), "volume-dashboard.png");
+      },
+      exportSvg: () => {
+        const container = document.createElement("div");
+        const svgChart = echarts.init(container, undefined, {
+          renderer: "svg",
+          width: 1200,
+          height: 480,
+        });
+        svgChart.setOption(option);
+        downloadDataUrl(svgChart.getDataURL({ type: "svg" }), "volume-dashboard.svg");
+        svgChart.dispose();
+      },
+    }),
+    [option],
+  );
 
   return (
     <Card as="section" aria-labelledby="volume-chart-title">
-      <div className="flex justify-between px-16 mb-4">
-        <div className="flex flex-wrap gap-2 items-center" aria-label={t("chartExportActions")}>
-          <p className="mr-4 text-slate-600">Volume:</p>
-          {onChartModeChange ? (
-            <div className="flex items-center gap-1" role="group" aria-label={t("chartMode")}>
-              {(["line", "area", "bar"] as const).map((mode) => (
-                <Button
-                  key={mode}
-                  type="button"
-                  aria-pressed={chartMode === mode}
-                  variant={chartMode === mode ? "primary" : "default"}
-                  onClick={() => onChartModeChange(mode)}
-                  className="px-2 text-xs"
-                >
-                  {mode === "line"
-                    ? t("chartLine")
-                    : mode === "area"
-                      ? t("chartArea")
-                      : t("chartBars")}
-                </Button>
-              ))}
-            </div>
-          ) : null}
-        </div>
-
-        <div className="flex flex-wrap gap-2">
-          <Button
-            type="button"
-            onClick={exportCsv}
-            className="px-3 flex items-center gap-1 text-xs"
-          >
-            <ExportIcon type="csv" />
-            <span>CSV</span>
-          </Button>
-          <Button
-            type="button"
-            onClick={() => exportImage("png")}
-            className="px-3 flex items-center gap-1 text-xs"
-          >
-            <ExportIcon type="image" />
-            <span>PNG</span>
-          </Button>
-          <Button
-            type="button"
-            onClick={() => exportImage("svg")}
-            className="px-3 flex items-center gap-1 text-xs"
-          >
-            <ExportIcon type="image" />
-            <span>SVG</span>
-          </Button>
-        </div>
-      </div>
       {!hasPoints ? <p className="text-sm text-slate-500">{t("noHistoricalPoints")}</p> : null}
 
       {hasPoints ? (
@@ -305,4 +217,4 @@ export function VolumeChart({
       </p>
     </Card>
   );
-}
+});

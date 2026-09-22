@@ -64,7 +64,6 @@ function DashboardPage() {
       fetchDashboardSnapshot(signal, range, categoryScope === "both" ? selectedCategoryIds : null),
     placeholderData: keepPreviousData,
     staleTime: 60_000,
-    refetchInterval: 5 * 60_000,
     retry: false,
     refetchOnWindowFocus: false,
   });
