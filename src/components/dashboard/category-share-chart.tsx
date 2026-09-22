@@ -1,7 +1,7 @@
 "use client";
 
 import ReactECharts from "echarts-for-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useI18n } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,8 @@ type CategoryShareChartProps = {
 
 type CategoryChartType = "pie" | "bar";
 
+const COMPACT_WIDTH_BREAKPOINT = 420;
+
 const categoryColors: Record<string, { border: string; fill: string }> = {
   politics: { border: "#2563eb", fill: "rgba(59, 130, 246, 0.16)" },
   weather: { border: "#7c3aed", fill: "rgba(139, 92, 246, 0.16)" },
@@ -32,6 +34,21 @@ function colorsForCategory(category: CategoryShare): { border: string; fill: str
 export function CategoryShareChart({ data }: CategoryShareChartProps) {
   const { t, categoryLabel, formatValue } = useI18n();
   const [chartType, setChartType] = useState<CategoryChartType>("pie");
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [isCompact, setIsCompact] = useState(false);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const observer = new ResizeObserver(([entry]) => {
+      setIsCompact(entry.contentRect.width < COMPACT_WIDTH_BREAKPOINT);
+    });
+    observer.observe(container);
+
+    return () => observer.disconnect();
+  }, []);
+
   const option = useMemo(() => {
     const chartData = data.map((item) => ({
       name: categoryLabel(item.id, item.label),
@@ -56,9 +73,12 @@ export function CategoryShareChart({ data }: CategoryShareChartProps) {
           {
             name: t("categoryShareSeries"),
             type: "pie",
-            radius: ["38%", "68%"],
+            radius: isCompact ? ["34%", "58%"] : ["38%", "68%"],
             avoidLabelOverlap: true,
-            label: { formatter: "{b}\n{d}%" },
+            label: isCompact
+              ? { show: true, position: "inside", formatter: "{d}%", color: "#fff", fontSize: 11 }
+              : { formatter: "{b}\n{d}%" },
+            labelLine: { show: !isCompact },
             data: chartData,
           },
         ],
@@ -72,11 +92,12 @@ export function CategoryShareChart({ data }: CategoryShareChartProps) {
         trigger: "axis",
         valueFormatter: (value: number) => formatValue(value),
       },
-      grid: { left: 56, right: 24, top: 20, bottom: 36, containLabel: true },
+      grid: { left: 56, right: 24, top: 20, bottom: isCompact ? 56 : 36, containLabel: true },
       xAxis: {
         type: "category",
         data: chartData.map((item) => item.name),
         axisTick: { show: false },
+        axisLabel: { rotate: isCompact ? 30 : 0 },
       },
       yAxis: {
         type: "value",
@@ -96,7 +117,8 @@ export function CategoryShareChart({ data }: CategoryShareChartProps) {
         },
       ],
     };
-  }, [categoryLabel, chartType, data, formatValue, t]);
+  }, [categoryLabel, chartType, data, formatValue, isCompact, t]);
+
 
   return (
     <Card
@@ -128,17 +150,19 @@ export function CategoryShareChart({ data }: CategoryShareChartProps) {
           ))}
         </div>
       </div>
-      {data.length ? (
-        <ReactECharts
-          option={option}
-          notMerge
-          lazyUpdate
-          aria-label={t("marketVolumeShare")}
-          style={{ height: 280, width: "100%" }}
-        />
-      ) : (
-        <p className="py-12 text-center text-sm text-slate-500">{t("noCategoryVolume")}</p>
-      )}
+      <div ref={containerRef}>
+        {data.length ? (
+          <ReactECharts
+            option={option}
+            notMerge
+            lazyUpdate
+            aria-label={t("marketVolumeShare")}
+            style={{ height: 280, width: "100%" }}
+          />
+        ) : (
+          <p className="py-12 text-center text-sm text-slate-500">{t("noCategoryVolume")}</p>
+        )}
+      </div>
     </Card>
   );
 }

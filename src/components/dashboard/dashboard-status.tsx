@@ -5,21 +5,82 @@ import { Button } from "@/components/ui/button";
 
 type SourceErrors = Partial<Record<Platform, string>>;
 
+function SkeletonBlock({ className = "" }: { className?: string }) {
+  return <div className={`animate-pulse rounded-md bg-slate-200 dark:bg-slate-800 ${className}`} />;
+}
+
 export function DashboardSkeleton() {
   const { t } = useI18n();
   return (
-    <section className="space-y-4 py-8" aria-label="Loading dashboard" aria-live="polite">
-      <div className="h-11 animate-pulse rounded-md bg-slate-200 dark:bg-slate-800" />
-      <div className="grid gap-4 sm:grid-cols-3">
-        {["skeleton-total", "skeleton-kalshi", "skeleton-polymarket"].map((key) => (
-          <div key={key} className="h-24 animate-pulse bg-slate-200 dark:bg-slate-800" />
+    <section className="space-y-6 py-6" aria-label="Loading dashboard" aria-live="polite">
+      <SkeletonBlock className="h-11 w-2/3" />
+
+      <div className="grid gap-3 sm:grid-cols-3">
+        {["skeleton-range", "skeleton-categories", "skeleton-scope"].map((key) => (
+          <div
+            key={key}
+            className="space-y-3 border border-slate-200 p-4 dark:border-slate-800"
+          >
+            <SkeletonBlock className="h-4 w-24" />
+            <div className="flex flex-wrap gap-2">
+              <SkeletonBlock className="h-8.5 w-16" />
+              <SkeletonBlock className="h-8.5 w-16" />
+              <SkeletonBlock className="h-8.5 w-16" />
+            </div>
+          </div>
         ))}
       </div>
-      <div className="h-[360px] animate-pulse border border-slate-200 bg-slate-200 dark:border-slate-800 dark:bg-slate-900" />
+
+      <div className="border border-slate-200 p-4 dark:border-slate-800">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <SkeletonBlock className="h-8.5 w-14" />
+            <SkeletonBlock className="h-8.5 w-14" />
+            <SkeletonBlock className="h-8.5 w-14" />
+          </div>
+          <div className="flex items-center gap-2">
+            <SkeletonBlock className="h-8.5 w-16" />
+            <SkeletonBlock className="h-8.5 w-16" />
+            <SkeletonBlock className="h-8.5 w-16" />
+          </div>
+        </div>
+        <SkeletonBlock className="h-100 w-full" />
+      </div>
+
+      <div className="border border-slate-200 p-0 dark:border-slate-800">
+        <div className="grid gap-4 border-b border-slate-200 p-4 dark:border-slate-800 sm:grid-cols-2">
+          <div className="space-y-3">
+            <SkeletonBlock className="h-8 w-40" />
+            <SkeletonBlock className="h-10 w-32" />
+            <SkeletonBlock className="h-5 w-48" />
+          </div>
+          <div className="space-y-4">
+            <SkeletonBlock className="h-5 w-full" />
+            <SkeletonBlock className="h-5 w-full" />
+          </div>
+        </div>
+        <div className="flex items-center justify-between p-4">
+          <SkeletonBlock className="h-4 w-32" />
+          <SkeletonBlock className="h-4 w-20" />
+        </div>
+      </div>
+
+      <SkeletonBlock className="h-64 w-full" />
+
+      <div className="border border-slate-200 p-4 dark:border-slate-800">
+        <SkeletonBlock className="mb-4 h-9 w-full max-w-sm" />
+        <div className="space-y-2">
+          {["row-1", "row-2", "row-3", "row-4", "row-5", "row-6"].map((key) => (
+            <SkeletonBlock key={key} className="h-10 w-full" />
+          ))}
+        </div>
+      </div>
+
       <p className="text-sm text-slate-600 dark:text-slate-300">{t("loadingData")}</p>
     </section>
   );
 }
+
 
 export function InitialLoadError({ onRetry }: { onRetry: () => void }) {
   const { t } = useI18n();

@@ -2,7 +2,7 @@
 
 import * as echarts from "echarts";
 import ReactECharts from "echarts-for-react";
-import { forwardRef, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 
 import { useI18n } from "@/lib/i18n";
 import type { PlatformSeries } from "@/types/market";
@@ -20,6 +20,8 @@ type VolumeChartProps = {
   isLoading?: boolean;
   chartMode?: ChartMode;
 };
+
+const COMPACT_WIDTH_BREAKPOINT = 480;
 
 function downloadDataUrl(dataUrl: string, filename: string): void {
   const anchor = document.createElement("a");
@@ -41,6 +43,21 @@ export const VolumeChart = forwardRef<VolumeChartHandle, VolumeChartProps>(funct
   const [zoom, setZoom] = useState({ start: 0, end: 100 });
   const hasPoints = series.some((item) => item.points.length > 0);
   const chartRef = useRef<ReactECharts>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [isCompact, setIsCompact] = useState(false);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const observer = new ResizeObserver(([entry]) => {
+      setIsCompact(entry.contentRect.width < COMPACT_WIDTH_BREAKPOINT);
+    });
+    observer.observe(container);
+
+    return () => observer.disconnect();
+  }, []);
+
   const option = useMemo(() => {
     const timestamps = series[0]?.points.map((point) => point.timestamp * 1000) ?? [];
     return {
@@ -58,7 +75,15 @@ export const VolumeChart = forwardRef<VolumeChartHandle, VolumeChartProps>(funct
         confine: true,
         valueFormatter: (value: number | null) => formatValue(value),
       },
-      legend: { data: ["Kalshi", "Polymarket"], top: 8, left: "center" },
+      legend: {
+        data: ["Kalshi", "Polymarket"],
+        top: 8,
+        left: "center",
+        itemWidth: isCompact ? 14 : 25,
+        itemHeight: isCompact ? 10 : 14,
+        itemGap: isCompact ? 12 : 25,
+        textStyle: { fontSize: isCompact ? 11 : 12 },
+      },
       dataZoom: [
         {
           type: "inside",
@@ -81,12 +106,19 @@ export const VolumeChart = forwardRef<VolumeChartHandle, VolumeChartProps>(funct
           brushSelect: false,
         },
       ],
-      grid: { left: 64, right: 64, top: 48, bottom: 78, containLabel: true },
+      grid: {
+        left: isCompact ? 8 : 64,
+        right: isCompact ? 8 : 64,
+        top: isCompact ? 40 : 48,
+        bottom: 78,
+        containLabel: true,
+      },
       xAxis: {
         type: "time",
         data: timestamps,
         axisLabel: {
           hideOverlap: true,
+          fontSize: isCompact ? 10 : 12,
           formatter: (value: number) =>
             new Intl.DateTimeFormat(locale === "zh" ? "zh-CN" : locale, {
               month: "short",
@@ -97,10 +129,11 @@ export const VolumeChart = forwardRef<VolumeChartHandle, VolumeChartProps>(funct
       yAxis: [
         {
           type: "value",
-          name: t("kalshiUsd"),
+          name: isCompact ? "" : t("kalshiUsd"),
           nameTextStyle: { color: "rgba(8, 145, 178, 0.8)" },
           axisLabel: {
             color: "rgba(8, 145, 178, 0.8)",
+            fontSize: isCompact ? 10 : 12,
             formatter: (value: number) => formatValue(value),
           },
           axisLine: { show: true, lineStyle: { color: "rgba(8, 145, 178, 0.55)" } },
@@ -113,10 +146,11 @@ export const VolumeChart = forwardRef<VolumeChartHandle, VolumeChartProps>(funct
         },
         {
           type: "value",
-          name: t("polymarketUsd"),
+          name: isCompact ? "" : t("polymarketUsd"),
           nameTextStyle: { color: "rgba(249, 115, 22, 0.8)" },
           axisLabel: {
             color: "rgba(249, 115, 22, 0.8)",
+            fontSize: isCompact ? 10 : 12,
             formatter: (value: number) => formatValue(value),
           },
           axisLine: { show: true, lineStyle: { color: "rgba(249, 115, 22, 0.55)" } },
@@ -141,7 +175,7 @@ export const VolumeChart = forwardRef<VolumeChartHandle, VolumeChartProps>(funct
         data: item.points.map((point) => [point.timestamp * 1000, point.volumeUsd]),
       })),
     };
-  }, [chartMode, formatValue, locale, series, t, zoom]);
+  }, [chartMode, formatValue, isCompact, locale, series, t, zoom]);
 
   function handleDataZoom(event: unknown): void {
     const payload = event as {
@@ -183,7 +217,7 @@ export const VolumeChart = forwardRef<VolumeChartHandle, VolumeChartProps>(funct
       {!hasPoints ? <p className="text-sm text-slate-500">{t("noHistoricalPoints")}</p> : null}
 
       {hasPoints ? (
-        <div className="relative" aria-busy={isLoading}>
+        <div ref={containerRef} className="relative" aria-busy={isLoading}>
           <ReactECharts
             ref={chartRef}
             option={option}
