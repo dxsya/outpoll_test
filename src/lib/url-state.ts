@@ -2,6 +2,7 @@ import {
   platforms,
   type DashboardMetric,
   type DashboardRange,
+  type CategoryScope,
   type Platform,
 } from "@/types/market";
 
@@ -10,10 +11,12 @@ export type DashboardUrlState = {
   categoryIds: string[] | null;
   platformIds: Platform[] | null;
   metric: DashboardMetric;
+  categoryScope: CategoryScope;
 };
 
 const validRanges: DashboardRange[] = ["7d", "30d", "90d", "all"];
 const validMetrics: DashboardMetric[] = ["total", "average", "markets"];
+const validCategoryScopes: CategoryScope[] = ["both", "kalshi", "polymarket"];
 
 export function parseDashboardUrlState(searchParams: URLSearchParams): DashboardUrlState {
   const rangeParam = searchParams.get("range");
@@ -48,8 +51,12 @@ export function parseDashboardUrlState(searchParams: URLSearchParams): Dashboard
   const metric = validMetrics.includes(metricParam as DashboardMetric)
     ? (metricParam as DashboardMetric)
     : "total";
+  const categoryScopeParam = searchParams.get("categoryScope");
+  const categoryScope = validCategoryScopes.includes(categoryScopeParam as CategoryScope)
+    ? (categoryScopeParam as CategoryScope)
+    : "both";
 
-  return { range, categoryIds, platformIds, metric };
+  return { range, categoryIds, platformIds, metric, categoryScope };
 }
 
 export function serializeDashboardUrlState(state: DashboardUrlState): string {
@@ -66,6 +73,10 @@ export function serializeDashboardUrlState(state: DashboardUrlState): string {
 
   if (state.metric !== "total") {
     params.set("metric", state.metric);
+  }
+
+  if (state.categoryScope !== "both") {
+    params.set("categoryScope", state.categoryScope);
   }
 
   const query = params.toString();

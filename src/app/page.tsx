@@ -2,12 +2,9 @@
 
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useMemo } from "react";
+import { Suspense, useMemo, useState } from "react";
 
-import { dashboardQueryKey, fetchDashboardSnapshot } from "@/lib/api/dashboard-query";
-import { aggregateVolumePoints, chooseAggregationBucket } from "@/lib/chart/aggregate-series";
 import { DashboardFilters } from "@/components/dashboard/dashboard-filters";
-import { DashboardHeader } from "@/components/dashboard/dashboard-header";
 import type { CategoryShare } from "@/components/dashboard/category-share-chart";
 import {
   DashboardSkeleton,
@@ -15,12 +12,17 @@ import {
   RefreshError,
   SourceErrors,
 } from "@/components/dashboard/dashboard-status";
-import { DashboardVolumeSection } from "@/components/dashboard/dashboard-volume-section";
 import { DashboardSummary } from "@/components/dashboard/dashboard-summary";
+import { DashboardVolumeSection } from "@/components/dashboard/dashboard-volume-section";
 import { MarketTable } from "@/components/dashboard/market-table";
-import { parseDashboardUrlState, serializeDashboardUrlState } from "@/lib/url-state";
+import { type ChartMode } from "@/components/dashboard/volume-chart";
+import { DashboardHeader } from "@/components/layout/dashboard-header";
+import { Card } from "@/components/ui/card";
 import { useI18n } from "@/lib/i18n";
-import type { DashboardMetric, DashboardRange, Platform } from "@/types/market";
+import { dashboardQueryKey, fetchDashboardSnapshot } from "@/lib/api/dashboard-query";
+import { aggregateVolumePoints, chooseAggregationBucket } from "@/lib/chart/aggregate-series";
+import { parseDashboardUrlState, serializeDashboardUrlState } from "@/lib/url-state";
+import type { CategoryScope, DashboardMetric, DashboardRange, Platform } from "@/types/market";
 
 function DashboardPage() {
   const router = useRouter();
@@ -30,13 +32,15 @@ function DashboardPage() {
     () => parseDashboardUrlState(new URLSearchParams(searchParams.toString())),
     [searchParams],
   );
-  const { range, categoryIds: selectedCategoryIds, platformIds, metric } = urlState;
+  const { range, categoryIds: selectedCategoryIds, platformIds, metric, categoryScope } = urlState;
+  const [chartMode, setChartMode] = useState<ChartMode>("line");
 
   function updateUrl(nextState: {
     range?: DashboardRange;
     categoryIds?: string[] | null;
     platformIds?: Platform[] | null;
     metric?: DashboardMetric;
+    categoryScope?: CategoryScope;
   }): void {
     router.push(
       `${pathname}${serializeDashboardUrlState({
@@ -45,66 +49,73 @@ function DashboardPage() {
           nextState.categoryIds === undefined ? selectedCategoryIds : nextState.categoryIds,
         platformIds: nextState.platformIds === undefined ? platformIds : nextState.platformIds,
         metric: nextState.metric ?? metric,
+        categoryScope: nextState.categoryScope ?? categoryScope,
       })}`,
       { scroll: false },
     );
   }
 
   const query = useQuery({
-    queryKey: dashboardQueryKey({ range, categoryIds: selectedCategoryIds }),
-    queryFn: ({ signal }) => fetchDashboardSnapshot(signal, range, selectedCategoryIds),
+    queryKey: dashboardQueryKey({
+      range,
+      categoryIds: categoryScope === "both" ? selectedCategoryIds : null,
+    }),
+    queryFn: ({ signal }) =>
+      fetchDashboardSnapshot(signal, range, categoryScope === "both" ? selectedCategoryIds : null),
     placeholderData: keepPreviousData,
     staleTime: 60_000,
+    refetchInterval: 5 * 60_000,
     retry: false,
     refetchOnWindowFocus: false,
   });
   const dashboard = query.data;
   const sourceErrors = dashboard?.sourceErrors ?? {};
   const effectiveCategoryIds = useMemo(() => {
-    if (selectedCategoryIds === null || !dashboard) {
-      return selectedCategoryIds;
-    }
-
+    if (selectedCategoryIds === null || !dashboard) return selectedCategoryIds;
     const availableIds = new Set(dashboard.categories.map((category) => category.id));
-    const knownIds = selectedCategoryIds.filter((id) => availableIds.has(id));
-    return knownIds;
+    return selectedCategoryIds.filter((id) => availableIds.has(id));
   }, [dashboard, selectedCategoryIds]);
   const filteredMarkets = useMemo(
     () =>
       dashboard?.markets.filter(
-        (market) => platformIds === null || platformIds.includes(market.platform),
+        (market) =>
+          (platformIds === null || platformIds.includes(market.platform)) &&
+          (selectedCategoryIds === null ||
+            (categoryScope === "both"
+              ? selectedCategoryIds.includes(market.category.id)
+              : market.platform !== categoryScope ||
+                selectedCategoryIds.includes(market.category.id))),
       ) ?? [],
-    [dashboard, platformIds],
+    [categoryScope, dashboard, platformIds, selectedCategoryIds],
   );
   const filteredMarketIds = useMemo(
     () => new Set(filteredMarkets.map((market) => `${market.platform}:${market.id}`)),
     [filteredMarkets],
   );
-  const chartSeries = useMemo(() => {
-    if (!dashboard) {
-      return [];
-    }
-
-    const points = dashboard.volumePoints.filter((point) =>
-      filteredMarketIds.has(`${point.platform}:${point.marketId}`),
-    );
-    return aggregateVolumePoints(points, chooseAggregationBucket(range));
-  }, [dashboard, filteredMarketIds, range]);
+  const filteredVolumePoints = useMemo(
+    () =>
+      dashboard?.volumePoints.filter((point) =>
+        filteredMarketIds.has(`${point.platform}:${point.marketId}`),
+      ) ?? [],
+    [dashboard, filteredMarketIds],
+  );
+  const chartSeries = useMemo(
+    () => aggregateVolumePoints(filteredVolumePoints, chooseAggregationBucket(range)),
+    [filteredVolumePoints, range],
+  );
   const categoryShare = useMemo<CategoryShare[]>(() => {
     if (!dashboard) return [];
     const labels = new Map(dashboard.categories.map((category) => [category.id, category.label]));
     const totals = new Map<string, number>();
-    dashboard.volumePoints
-      .filter((point) => filteredMarketIds.has(`${point.platform}:${point.marketId}`))
-      .forEach((point) => {
-        if (point.volumeUsd !== null) {
-          totals.set(point.categoryId, (totals.get(point.categoryId) ?? 0) + point.volumeUsd);
-        }
-      });
+    filteredVolumePoints.forEach((point) => {
+      if (point.volumeUsd !== null) {
+        totals.set(point.categoryId, (totals.get(point.categoryId) ?? 0) + point.volumeUsd);
+      }
+    });
     return [...totals.entries()]
       .map(([id, value]) => ({ id, label: labels.get(id) ?? id, value }))
       .sort((left, right) => right.value - left.value);
-  }, [dashboard, filteredMarketIds]);
+  }, [dashboard, filteredVolumePoints]);
   const periodDelta = useMemo(() => {
     const values = chartSeries.flatMap((item) => item.points.map((point) => point.volumeUsd ?? 0));
     if (values.length < 2) return null;
@@ -113,13 +124,6 @@ function DashboardPage() {
     const current = values.slice(midpoint).reduce((sum, value) => sum + value, 0);
     return previous === 0 ? null : ((current - previous) / previous) * 100;
   }, [chartSeries]);
-  const filteredVolumePoints = useMemo(
-    () =>
-      dashboard?.volumePoints.filter((point) =>
-        filteredMarketIds.has(`${point.platform}:${point.marketId}`),
-      ) ?? [],
-    [dashboard, filteredMarketIds],
-  );
   const totalVolume = useMemo(
     () => filteredVolumePoints.reduce((total, point) => total + (point.volumeUsd ?? 0), 0),
     [filteredVolumePoints],
@@ -134,7 +138,16 @@ function DashboardPage() {
           ? 30
           : range === "90d"
             ? 90
-            : Math.max(1, Math.ceil((Math.max(...timestamps) - Math.min(...timestamps)) / 86400));
+            : (() => {
+                const { earliest, latest } = timestamps.reduce(
+                  (bounds, timestamp) => ({
+                    earliest: Math.min(bounds.earliest, timestamp),
+                    latest: Math.max(bounds.latest, timestamp),
+                  }),
+                  { earliest: timestamps[0], latest: timestamps[0] },
+                );
+                return Math.max(1, Math.ceil((latest - earliest) / 86400));
+              })();
     return totalVolume / rangeDays;
   }, [filteredVolumePoints, range, totalVolume]);
   const volumeByMarket = useMemo(() => {
@@ -145,12 +158,29 @@ function DashboardPage() {
     });
     return totals;
   }, [filteredVolumePoints]);
+  const platformVolumes = useMemo(() => {
+    const totals: Record<Platform, number> = { kalshi: 0, polymarket: 0 };
+    filteredVolumePoints.forEach((point) => {
+      totals[point.platform] += point.volumeUsd ?? 0;
+    });
+    return totals;
+  }, [filteredVolumePoints]);
+  const platformLastTimestamps = useMemo(() => {
+    const latest: Record<Platform, number | null> = { kalshi: null, polymarket: null };
+    filteredVolumePoints.forEach((point) => {
+      latest[point.platform] = Math.max(latest[point.platform] ?? 0, point.timestamp);
+    });
+    return latest;
+  }, [filteredVolumePoints]);
 
   return (
-    <main className="min-h-screen bg-slate-50 px-4 py-8 text-slate-950 dark:bg-slate-950 dark:text-white sm:px-8">
+    <main className="min-h-screen bg-slate-50 px-4 py-2 text-slate-950 dark:bg-slate-950 dark:text-white sm:px-8">
       <div className="mx-auto max-w-7xl">
-        <DashboardHeader fetchedAt={dashboard?.fetchedAt} />
-
+        <DashboardHeader
+          fetchedAt={dashboard?.fetchedAt}
+          isRefreshing={query.isFetching}
+          isStale={query.isStale}
+        />
         {query.isPending && !dashboard ? (
           <DashboardSkeleton />
         ) : query.isError && !dashboard ? (
@@ -169,14 +199,16 @@ function DashboardPage() {
               selectedCategoryIds={selectedCategoryIds}
               effectiveCategoryIds={effectiveCategoryIds}
               platformIds={platformIds}
+              categoryScope={categoryScope}
               categories={dashboard.categories}
-              disabled={query.isFetching}
               onChange={updateUrl}
             />
             <DashboardVolumeSection
               categoryIds={effectiveCategoryIds}
               series={chartSeries}
               isLoading={query.isFetching}
+              chartMode={chartMode}
+              onChartModeChange={setChartMode}
             />
             <DashboardSummary
               periodDelta={periodDelta}
@@ -186,6 +218,8 @@ function DashboardPage() {
               averageDailyVolume={averageDailyVolume}
               marketCount={filteredMarkets.length}
               onMetricChange={(nextMetric) => updateUrl({ metric: nextMetric })}
+              platformVolumes={platformVolumes}
+              platformLastTimestamps={platformLastTimestamps}
             />
             <MarketTable markets={filteredMarkets} volumeByMarket={volumeByMarket} />
           </>

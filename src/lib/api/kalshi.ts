@@ -52,7 +52,7 @@ export function normalizeKalshiCandlesticks(
   categoryId = "uncategorized",
 ): VolumePoint[] {
   return candlesticks.map((candlestick) => ({
-    timestamp: parseTimestampSeconds(candlestick.end_period_ts, "end_period_ts"),
+    timestamp: parseTimestampSeconds(candlestick.end_period_ts, "end_period_ts") - 24 * 60 * 60,
     volumeUsd: parseFiniteNumber(candlestick.volume_fp, "volume_fp"),
     marketId: market.ticker,
     categoryId,

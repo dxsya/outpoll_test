@@ -18,6 +18,27 @@ import type { DashboardRange, Market, Platform, PlatformSeries, VolumePoint } fr
 
 const TOP_MARKETS_PER_CATEGORY = 15;
 const HISTORY_REQUEST_CONCURRENCY = 4;
+const DAY_SECONDS = 24 * 60 * 60;
+
+function kalshiHistoryWindow(
+  range: DashboardRange,
+  market: KalshiMarket,
+  rangeWindow: { startTs: number; endTs: number },
+): { startTs: number; endTs: number } {
+  if (range !== "all" || !market.created_time) {
+    return rangeWindow;
+  }
+
+  const createdTimestamp = Math.floor(Date.parse(market.created_time) / 1000);
+  if (!Number.isFinite(createdTimestamp) || createdTimestamp <= 0) {
+    return rangeWindow;
+  }
+
+  return {
+    startTs: Math.min(createdTimestamp, rangeWindow.endTs),
+    endTs: rangeWindow.endTs,
+  };
+}
 
 export type DashboardQueryParams = {
   range: DashboardRange;
@@ -152,6 +173,7 @@ export async function fetchDashboardSnapshotFromApis(
 ): Promise<DashboardData> {
   const endTs = Math.floor(Date.now() / 1000);
   const rangeWindow = getRangeWindow(range, endTs);
+  const kalshiRangeWindow = { ...rangeWindow, endTs: rangeWindow.endTs + DAY_SECONDS };
   const selectedCategories = categoryIds === null ? null : new Set(categoryIds);
 
   if (selectedCategories?.size === 0) {
@@ -219,7 +241,7 @@ export async function fetchDashboardSnapshotFromApis(
         Promise.allSettled([
           fetchKalshiCandlesticks(
             market,
-            rangeWindow,
+            kalshiHistoryWindow(range, market, kalshiRangeWindow),
             seriesTicker,
             signal,
             definition.id,

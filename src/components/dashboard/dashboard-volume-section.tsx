@@ -1,4 +1,5 @@
-import { VolumeChart } from "@/components/dashboard/volume-chart";
+import { VolumeChart, type ChartMode } from "@/components/dashboard/volume-chart";
+import { LightweightVolumeChart } from "@/components/dashboard/lightweight-volume-chart";
 import type { PlatformSeries } from "@/types/market";
 import { useI18n } from "@/lib/i18n";
 
@@ -6,12 +7,16 @@ type DashboardVolumeSectionProps = {
   categoryIds: string[] | null;
   series: PlatformSeries[];
   isLoading: boolean;
+  chartMode: ChartMode;
+  onChartModeChange: (mode: ChartMode) => void;
 };
 
 export function DashboardVolumeSection({
   categoryIds,
   series,
   isLoading,
+  chartMode,
+  onChartModeChange,
 }: DashboardVolumeSectionProps) {
   const { t } = useI18n();
   const hasNoData = series.every((item) => item.points.every((point) => point.volumeUsd === null));
@@ -51,7 +56,13 @@ export function DashboardVolumeSection({
 
   return (
     <section className="relative py-6">
-      <VolumeChart series={series} isLoading={isLoading} />
+      <VolumeChart
+        series={series}
+        isLoading={isLoading}
+        chartMode={chartMode}
+        onChartModeChange={onChartModeChange}
+      />
+      <LightweightVolumeChart series={series} isLoading={isLoading} chartMode={chartMode} />
     </section>
   );
 }

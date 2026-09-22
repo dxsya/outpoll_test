@@ -1,6 +1,6 @@
 import type { DashboardRange, Market, Platform, PlatformSeries, VolumePoint } from "@/types/market";
 
-export type AggregationBucket = "day" | "week" | "month";
+export type AggregationBucket = "day" | "3-day" | "week" | "14-day" | "month";
 
 const PLATFORM_ORDER: Platform[] = ["kalshi", "polymarket"];
 
@@ -22,10 +22,10 @@ export function chooseAggregationBucket(range: DashboardRange): AggregationBucke
   }
 
   if (range === "90d") {
-    return "week";
+    return "3-day";
   }
 
-  return "month";
+  return "14-day";
 }
 
 function startOfUtcBucket(timestamp: number, bucket: AggregationBucket): number {
@@ -42,6 +42,19 @@ function startOfUtcBucket(timestamp: number, bucket: AggregationBucket): number 
     const dayOfWeek = date.getUTCDay();
     const daysFromMonday = (dayOfWeek + 6) % 7;
     return Date.UTC(year, month, day - daysFromMonday) / 1000;
+  }
+
+  if (bucket === "3-day") {
+    return Date.UTC(year, month, day - ((day - 1) % 3)) / 1000;
+  }
+
+  if (bucket === "14-day") {
+    const currentDay = Date.UTC(year, month, day);
+    const epochMonday = Date.UTC(1970, 0, 5);
+    const daysSinceEpochMonday = Math.floor((currentDay - epochMonday) / (24 * 60 * 60 * 1000));
+    const bucketStart =
+      epochMonday + Math.floor(daysSinceEpochMonday / 14) * 14 * 24 * 60 * 60 * 1000;
+    return bucketStart / 1000;
   }
 
   return Date.UTC(year, month, day) / 1000;

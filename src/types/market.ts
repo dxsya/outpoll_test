@@ -6,6 +6,8 @@ export type DashboardRange = "7d" | "30d" | "90d" | "all";
 
 export type DashboardMetric = "total" | "average" | "markets";
 
+export type CategoryScope = "both" | "kalshi" | "polymarket";
+
 export type MarketCategory = {
   id: string;
   label: string;

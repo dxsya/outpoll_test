@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { normalizeKalshiMarket } from "@/lib/api/kalshi";
+import { normalizeKalshiCandlesticks, normalizeKalshiMarket } from "@/lib/api/kalshi";
 import { normalizePolymarketMarket, normalizePolymarketTrades } from "@/lib/api/polymarket";
 
 describe("market normalization", () => {
@@ -22,6 +22,20 @@ describe("market normalization", () => {
       category: { id: "sports", label: "Sports" },
       source: { status: "active", volumeContracts: "123.45" },
     });
+  });
+
+  it("anchors Kalshi daily candles to the start of their period", () => {
+    const points = normalizeKalshiCandlesticks(
+      {
+        ticker: "KXTEST-YES",
+        event_ticker: "KXTEST",
+        volume_fp: "123.45",
+      },
+      [{ end_period_ts: Date.UTC(2026, 0, 8) / 1000, volume_fp: "10" }],
+      "sports",
+    );
+
+    expect(points[0].timestamp).toBe(Date.UTC(2026, 0, 7) / 1000);
   });
 
   it("attaches the resolved category to a Polymarket market", () => {

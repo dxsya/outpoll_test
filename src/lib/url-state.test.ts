@@ -9,6 +9,7 @@ describe("dashboard URL state", () => {
       categoryIds: null,
       platformIds: null,
       metric: "total",
+      categoryScope: "both",
     });
   });
 
@@ -18,6 +19,7 @@ describe("dashboard URL state", () => {
       categoryIds: [],
       platformIds: null,
       metric: "total",
+      categoryScope: "both",
     });
     expect(
       serializeDashboardUrlState({
@@ -25,6 +27,7 @@ describe("dashboard URL state", () => {
         categoryIds: null,
         platformIds: null,
         metric: "total",
+        categoryScope: "both",
       }),
     ).toBe("?range=7d");
     expect(
@@ -33,6 +36,7 @@ describe("dashboard URL state", () => {
         categoryIds: [],
         platformIds: null,
         metric: "total",
+        categoryScope: "both",
       }),
     ).toBe("?range=7d&categories=");
   });
@@ -44,6 +48,7 @@ describe("dashboard URL state", () => {
         categoryIds: ["sports", "politics", "sports"],
         platformIds: null,
         metric: "total",
+        categoryScope: "both",
       }),
     ).toBe("?range=90d&categories=politics%2Csports");
     expect(
@@ -53,6 +58,7 @@ describe("dashboard URL state", () => {
       categoryIds: ["politics", "sports"],
       platformIds: null,
       metric: "total",
+      categoryScope: "both",
     });
   });
 
@@ -62,12 +68,28 @@ describe("dashboard URL state", () => {
       categoryIds: null,
       platformIds: ["polymarket", "kalshi"] as ("kalshi" | "polymarket")[],
       metric: "average" as const,
+      categoryScope: "polymarket" as const,
     };
     const serialized = serializeDashboardUrlState(state);
-    expect(serialized).toBe("?range=30d&platforms=kalshi%2Cpolymarket&metric=average");
+    expect(serialized).toBe(
+      "?range=30d&platforms=kalshi%2Cpolymarket&metric=average&categoryScope=polymarket",
+    );
     expect(parseDashboardUrlState(new URLSearchParams(serialized))).toEqual({
       ...state,
       platformIds: ["kalshi", "polymarket"],
     });
+  });
+
+  it("round-trips category scope selections", () => {
+    const state = {
+      range: "30d" as const,
+      categoryIds: ["sports"],
+      platformIds: null,
+      metric: "total" as const,
+      categoryScope: "kalshi" as const,
+    };
+    const serialized = serializeDashboardUrlState(state);
+    expect(serialized).toBe("?range=30d&categories=sports&categoryScope=kalshi");
+    expect(parseDashboardUrlState(new URLSearchParams(serialized))).toEqual(state);
   });
 });

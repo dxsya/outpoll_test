@@ -89,11 +89,61 @@ describe("domain volume aggregation", () => {
     expect(aggregateVolumePoints(points, "week")[0].points[0].volumeUsd).toBe(5);
   });
 
+  it("aggregates three-day buckets from UTC calendar boundaries", () => {
+    const points = [
+      point({ timestamp: Date.UTC(2026, 0, 4, 1) / 1000, volumeUsd: 2 }),
+      point({ timestamp: Date.UTC(2026, 0, 6, 23) / 1000, volumeUsd: 3 }),
+      point({ timestamp: Date.UTC(2026, 0, 7, 0) / 1000, volumeUsd: 5 }),
+    ];
+
+    expect(aggregateVolumePoints(points, "3-day")[0].points).toEqual([
+      {
+        timestamp: Date.UTC(2026, 0, 4) / 1000,
+        volumeUsd: 5,
+        marketId: "aggregated",
+        categoryId: "aggregated",
+        platform: "kalshi",
+      },
+      {
+        timestamp: Date.UTC(2026, 0, 7) / 1000,
+        volumeUsd: 5,
+        marketId: "aggregated",
+        categoryId: "aggregated",
+        platform: "kalshi",
+      },
+    ]);
+  });
+
+  it("aggregates all-time data into fixed two-week UTC buckets", () => {
+    const points = [
+      point({ timestamp: Date.UTC(2026, 0, 5) / 1000, volumeUsd: 2 }),
+      point({ timestamp: Date.UTC(2026, 0, 18) / 1000, volumeUsd: 3 }),
+      point({ timestamp: Date.UTC(2026, 0, 19) / 1000, volumeUsd: 5 }),
+    ];
+
+    expect(aggregateVolumePoints(points, "14-day")[0].points).toEqual([
+      {
+        timestamp: Date.UTC(2026, 0, 5) / 1000,
+        volumeUsd: 5,
+        marketId: "aggregated",
+        categoryId: "aggregated",
+        platform: "kalshi",
+      },
+      {
+        timestamp: Date.UTC(2026, 0, 19) / 1000,
+        volumeUsd: 5,
+        marketId: "aggregated",
+        categoryId: "aggregated",
+        platform: "kalshi",
+      },
+    ]);
+  });
+
   it("chooses coarser buckets for longer ranges", () => {
     expect(chooseAggregationBucket("7d")).toBe("day");
     expect(chooseAggregationBucket("30d")).toBe("day");
-    expect(chooseAggregationBucket("90d")).toBe("week");
-    expect(chooseAggregationBucket("all")).toBe("month");
+    expect(chooseAggregationBucket("90d")).toBe("3-day");
+    expect(chooseAggregationBucket("all")).toBe("14-day");
   });
 
   it("supports long ranges with monthly aggregation", () => {

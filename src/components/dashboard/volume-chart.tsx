@@ -2,14 +2,20 @@
 
 import * as echarts from "echarts";
 import ReactECharts from "echarts-for-react";
-import { useMemo, useRef } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import { useI18n } from "@/lib/i18n";
 import type { PlatformSeries } from "@/types/market";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+
+export type ChartMode = "line" | "area" | "bar";
 
 type VolumeChartProps = {
   series: PlatformSeries[];
   isLoading?: boolean;
+  chartMode?: ChartMode;
+  onChartModeChange?: (mode: ChartMode) => void;
 };
 
 function downloadFile(content: string, filename: string, type: string): void {
@@ -28,13 +34,33 @@ function downloadDataUrl(dataUrl: string, filename: string): void {
   anchor.click();
 }
 
+function ExportIcon({ type }: { type: "csv" | "image" }) {
+  return type === "csv" ? (
+    <svg aria-hidden="true" className="size-3.5" viewBox="0 0 16 16" fill="none">
+      <path d="M8 2v8m0 0 3-3m-3 3L5 7M3 13h10" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
+  ) : (
+    <svg aria-hidden="true" className="size-3.5" viewBox="0 0 16 16" fill="none">
+      <rect x="2" y="2.5" width="12" height="11" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
+      <circle cx="5.5" cy="6" r="1" fill="currentColor" />
+      <path d="m3.5 11 2.5-2.5 2 2 1.5-1.5 3 3" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
+  );
+}
+
 const colors = {
   kalshi: "#0891b2",
   polymarket: "#f97316",
 } as const;
 
-export function VolumeChart({ series, isLoading = false }: VolumeChartProps) {
+export function VolumeChart({
+  series,
+  isLoading = false,
+  chartMode = "line",
+  onChartModeChange,
+}: VolumeChartProps) {
   const { locale, t, formatValue } = useI18n();
+  const [zoom, setZoom] = useState({ start: 0, end: 100 });
   const hasPoints = series.some((item) => item.points.length > 0);
   const chartRef = useRef<ReactECharts>(null);
   const option = useMemo(() => {
@@ -60,6 +86,8 @@ export function VolumeChart({ series, isLoading = false }: VolumeChartProps) {
           type: "inside",
           xAxisIndex: 0,
           filterMode: "none",
+          start: zoom.start,
+          end: zoom.end,
           zoomOnMouseWheel: true,
           moveOnMouseMove: true,
           moveOnMouseWheel: true,
@@ -68,6 +96,8 @@ export function VolumeChart({ series, isLoading = false }: VolumeChartProps) {
           type: "slider",
           xAxisIndex: 0,
           filterMode: "none",
+          start: zoom.start,
+          end: zoom.end,
           height: 22,
           bottom: 8,
           brushSelect: false,
@@ -122,17 +152,30 @@ export function VolumeChart({ series, isLoading = false }: VolumeChartProps) {
       ],
       series: series.map((item) => ({
         name: item.platform === "kalshi" ? "Kalshi" : "Polymarket",
-        type: "line",
+        type: chartMode === "bar" ? "bar" : "line",
         yAxisIndex: item.platform === "kalshi" ? 0 : 1,
         smooth: true,
         connectNulls: false,
         showSymbol: false,
         lineStyle: { width: 2.5 },
+        areaStyle: chartMode === "area" ? { opacity: 0.18 } : undefined,
         emphasis: { focus: "series" },
         data: item.points.map((point) => [point.timestamp * 1000, point.volumeUsd]),
       })),
     };
-  }, [formatValue, locale, series, t]);
+  }, [chartMode, formatValue, locale, series, t, zoom]);
+
+  function handleDataZoom(event: unknown): void {
+    const payload = event as {
+      batch?: Array<{ start?: number; end?: number }>;
+      start?: number;
+      end?: number;
+    };
+    const next = payload.batch?.[0] ?? payload;
+    if (typeof next.start === "number" && typeof next.end === "number") {
+      setZoom({ start: next.start, end: next.end });
+    }
+  }
 
   function exportCsv(): void {
     const timestamps = series[0]?.points.map((point) => point.timestamp) ?? [];
@@ -172,44 +215,61 @@ export function VolumeChart({ series, isLoading = false }: VolumeChartProps) {
   }
 
   return (
-    <section
-      aria-labelledby="volume-chart-title"
-      className="border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900"
-    >
-      <div className="flex flex-wrap items-baseline justify-between gap-3">
-        <div>
-          <h2 id="volume-chart-title" className="text-lg font-semibold">
-            {t("historicalVolume")}
-          </h2>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-            {t("volumeDescription")}
-          </p>
+    <Card as="section" aria-labelledby="volume-chart-title">
+      <div className="flex justify-between px-16 mb-4">
+        <div className="flex flex-wrap gap-2 items-center" aria-label={t("chartExportActions")}>
+          <p className="mr-4 text-slate-600">Volume:</p>
+          {onChartModeChange ? (
+            <div className="flex items-center gap-1" role="group" aria-label={t("chartMode")}>
+              {(["line", "area", "bar"] as const).map((mode) => (
+                <Button
+                  key={mode}
+                  type="button"
+                  aria-pressed={chartMode === mode}
+                  variant={chartMode === mode ? "primary" : "default"}
+                  onClick={() => onChartModeChange(mode)}
+                  className="px-2 text-xs"
+                >
+                  {mode === "line"
+                    ? t("chartLine")
+                    : mode === "area"
+                      ? t("chartArea")
+                      : t("chartBars")}
+                </Button>
+              ))}
+            </div>
+          ) : null}
         </div>
-        <div className="flex flex-wrap gap-2" aria-label={t("chartExportActions")}>
-          <button
+
+        <div className="flex flex-wrap gap-2">
+          <Button
             type="button"
             onClick={exportCsv}
-            className="min-h-10 rounded-md border px-3 text-xs font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500"
+            className="px-3 flex items-center gap-1 text-xs"
           >
-            CSV
-          </button>
-          <button
+            <ExportIcon type="csv" />
+            <span>CSV</span>
+          </Button>
+          <Button
             type="button"
             onClick={() => exportImage("png")}
-            className="min-h-10 rounded-md border px-3 text-xs font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500"
+            className="px-3 flex items-center gap-1 text-xs"
           >
-            PNG
-          </button>
-          <button
+            <ExportIcon type="image" />
+            <span>PNG</span>
+          </Button>
+          <Button
             type="button"
             onClick={() => exportImage("svg")}
-            className="min-h-10 rounded-md border px-3 text-xs font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500"
+            className="px-3 flex items-center gap-1 text-xs"
           >
-            SVG
-          </button>
+            <ExportIcon type="image" />
+            <span>SVG</span>
+          </Button>
         </div>
-        {!hasPoints ? <p className="text-sm text-slate-500">{t("noHistoricalPoints")}</p> : null}
       </div>
+      {!hasPoints ? <p className="text-sm text-slate-500">{t("noHistoricalPoints")}</p> : null}
+
       {hasPoints ? (
         <div className="relative" aria-busy={isLoading}>
           <ReactECharts
@@ -220,6 +280,7 @@ export function VolumeChart({ series, isLoading = false }: VolumeChartProps) {
             aria-label={t("historicalVolumeChart")}
             style={{ height: 400, width: "100%" }}
             opts={{ renderer: "canvas" }}
+            onEvents={{ datazoom: handleDataZoom }}
           />
           {isLoading ? (
             <div
@@ -242,6 +303,6 @@ export function VolumeChart({ series, isLoading = false }: VolumeChartProps) {
           )
           .join(". ")}
       </p>
-    </section>
+    </Card>
   );
 }
